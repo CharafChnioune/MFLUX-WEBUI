@@ -1,6 +1,6 @@
 # MFLUX WebUI
 
-![MFLUX Logo](https://raw.githubusercontent.com/CharafChnioune/mflux/main/src/mflux/assets/logo.png)
+![MFLUX WebUI Logo](mflux-webui/logo.png)
 
 A powerful and user-friendly web interface for MFLUX, powered by Gradio.
 
