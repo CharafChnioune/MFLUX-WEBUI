@@ -116,29 +116,22 @@ def load_ollama_settings():
 def create_ollama_settings():
     settings = load_ollama_settings()
     ollama_model = gr.Dropdown(
-        choices=get_available_ollama_models(), label="Ollama Model", value=settings['model'], visible=False
+        choices=get_available_ollama_models(), label="Ollama Model"
     )
     system_prompt = gr.Textbox(
-        label="System Prompt", lines=10, value=settings['system_prompt'], visible=False
+        label="System Prompt", lines=10, value=settings['system_prompt']
     )
-    save_button = gr.Button("Save Ollama Settings", visible=False)
-    status_box = gr.Textbox(label="Status", visible=False)
-    visibility_state = gr.State(False)
-    return [ollama_model, system_prompt, save_button, status_box, visibility_state]
+    save_button = gr.Button("Save Ollama Settings")
+    return [ollama_model, system_prompt, save_button]
 
-def toggle_ollama_settings(visible_state):
-    new_visible = not visible_state
-    return [gr.update(visible=new_visible) for _ in range(4)] + [new_visible]
-
-def save_settings(model, prompt, visible_state):
+def save_settings(model, prompt):
     save_ollama_settings(model, prompt)
-    new_visible = False
-    status_update = gr.update(value="Settings saved!", visible=True)
+    gr.Info("Settings saved!")
     model_update = gr.update(choices=get_available_ollama_models(), value=model)
-    component_updates = [gr.update(visible=new_visible) for _ in range(4)]
-    return [status_update, model_update] + component_updates + [new_visible]
+    return gr.update(open=False)
 
 def enhance_prompt(prompt, ollama_model, system_prompt):
+    print(f"prompt={prompt}, model={ollama_model}, system_prompt={system_prompt}")
     try:
         response = ollama.generate(
             model=ollama_model,
@@ -147,17 +140,15 @@ def enhance_prompt(prompt, ollama_model, system_prompt):
             options={"temperature": 0.7}
         )
         enhanced_prompt = response['response'].strip()
-        return enhanced_prompt, f"Promptly successfully improved with model {ollama_model}."
+        gr.Info(f"Prompt successfully improved with model {ollama_model}.")
+        return enhanced_prompt
     except Exception as e:
-        return prompt, f"Error while improving prompt: {str(e)}"
+        gr.Error(f"Error while improving prompt: {str(e)}")
+        return prompt
 
 def generate_image_gradio(
-    prompt, model, seed, height, width, steps, guidance, lora_files, metadata, use_ollama, ollama_model, system_prompt
+    prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt
 ):
-    if use_ollama:
-        prompt, message = enhance_prompt(prompt, ollama_model, system_prompt)
-    else:
-        message = "Ollama niet gebruikt voor promptverbetering."
 
     lora_paths = lora_files if lora_files else None
 
@@ -208,14 +199,9 @@ def generate_image_controlnet_gradio(
     lora_files,
     metadata,
     save_canny,
-    use_ollama,
     ollama_model,
     system_prompt
 ):
-    if use_ollama:
-        prompt, message = enhance_prompt(prompt, ollama_model, system_prompt)
-    else:
-        message = "Ollama not used for prompt improvement."
 
     lora_paths = lora_files if lora_files else None
 
@@ -270,14 +256,9 @@ def save_quantized_model_gradio(model, quantize, save_path):
 
     return f"Model saved at {save_path}"
 
-def simple_generate_image(prompt, model, height, width, lora_files, use_ollama, ollama_model, system_prompt):
+def simple_generate_image(prompt, model, height, width, lora_files, ollama_model, system_prompt):
     lora_dict = dict(get_available_lora_files())
     lora_paths = [lora_dict[lora] for lora in lora_files if lora in lora_dict]
-    
-    if use_ollama:
-        prompt, _ = enhance_prompt(prompt, ollama_model, system_prompt)
-    else:
-        message = "Ollama niet gebruikt voor promptverbetering."
 
     if "dev" in model:
         steps = 20
@@ -349,26 +330,17 @@ def create_ui():
             with gr.TabItem("MFLUX Easy", id=0):
                 with gr.Row():
                     with gr.Column():
-                        prompt_simple = gr.Textbox(label="Prompt", lines=2)
-                        with gr.Row():
-                            use_ollama_simple = gr.Checkbox(
-                                label="Enhance prompt with Ollama", value=False
-                            )
-                            with gr.Column(scale=1, min_width=100):
-                                ollama_settings_button_simple = gr.Button("⚙️ Ollama Settings")
-                        
-                        ollama_components_simple = create_ollama_settings()
-                        
-                        ollama_settings_button_simple.click(
-                            fn=toggle_ollama_settings,
-                            inputs=[ollama_components_simple[4]],
-                            outputs=ollama_components_simple
-                        )
+                        with gr.Group():
+                            prompt_simple = gr.Textbox(label="Prompt", lines=2)
+                            with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_simple:
+                                ollama_components_simple = create_ollama_settings()
+                            with gr.Row():
+                                enhance_ollama_simple = gr.Button("Enhance prompt with Ollama")
                         
                         ollama_components_simple[2].click(
                             fn=save_settings,
-                            inputs=[ollama_components_simple[0], ollama_components_simple[1], ollama_components_simple[4]],
-                            outputs=ollama_components_simple
+                            inputs=[ollama_components_simple[0], ollama_components_simple[1]],
+                            outputs=[ollama_section_simple]
                         )
                         
                         model_simple = gr.Dropdown(choices=["schnell", "dev"], label="Model", value="schnell")
@@ -386,6 +358,11 @@ def create_ui():
                         output_filename_simple = gr.Textbox(label="Saved Image Filename")
                         # Verwijder de status_box_simple regel
 
+                enhance_ollama_simple.click(
+                    fn=enhance_prompt,
+                    inputs=[prompt_simple, ollama_components_simple[0], ollama_components_simple[1]],
+                    outputs=prompt_simple
+                )
                 generate_button_simple.click(
                     fn=simple_generate_image,
                     inputs=[
@@ -394,7 +371,6 @@ def create_ui():
                         height_simple,
                         width_simple,
                         lora_files_simple,
-                        use_ollama_simple,
                         ollama_components_simple[0],
                         ollama_components_simple[1],
                     ],
@@ -404,24 +380,17 @@ def create_ui():
             with gr.TabItem("Advanced Generate"):
                 with gr.Row():
                     with gr.Column():
-                        prompt = gr.Textbox(label="Prompt", lines=2)
-                        with gr.Row():
-                            use_ollama = gr.Checkbox(label="Enhance prompt with Ollama", value=False)
-                            with gr.Column(scale=1, min_width=100):
-                                ollama_settings_button_adv = gr.Button("⚙️ Ollama Settings")
-                        
-                        ollama_components_adv = create_ollama_settings()
-                        
-                        ollama_settings_button_adv.click(
-                            fn=toggle_ollama_settings,
-                            inputs=[ollama_components_adv[4]],
-                            outputs=ollama_components_adv
-                        )
+                        with gr.Group():
+                            prompt = gr.Textbox(label="Prompt", lines=2)
+                            with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_adv:
+                                ollama_components_adv = create_ollama_settings()
+                            with gr.Row():
+                                enhance_ollama = gr.Button("Enhance prompt with Ollama")
                         
                         ollama_components_adv[2].click(
                             fn=save_settings,
-                            inputs=[ollama_components_adv[0], ollama_components_adv[1], ollama_components_adv[4]],
-                            outputs=ollama_components_adv
+                            inputs=[ollama_components_adv[0], ollama_components_adv[1]],
+                            outputs=[ollama_section_adv]
                         )
                         
                         model = gr.Dropdown(
@@ -445,6 +414,11 @@ def create_ui():
                         output_image = gr.Image(label="Generated Image")
                         output_filename = gr.Textbox(label="Saved Image Filename")
 
+                enhance_ollama.click(
+                    fn=enhance_prompt,
+                    inputs=[prompt, ollama_components_adv[0], ollama_components_adv[1]],
+                    outputs=prompt
+                )
                 generate_button.click(
                     fn=generate_image_gradio,
                     inputs=[
@@ -457,7 +431,6 @@ def create_ui():
                         guidance,
                         lora_files,
                         metadata,
-                        use_ollama,
                         ollama_components_adv[0],
                         ollama_components_adv[1],
                     ],
@@ -467,24 +440,17 @@ def create_ui():
             with gr.TabItem("ControlNet"):
                 with gr.Row():
                     with gr.Column():
-                        prompt_cn = gr.Textbox(label="Prompt", lines=2)
-                        with gr.Row():
-                            use_ollama_cn = gr.Checkbox(label="Enhance prompt with Ollama", value=False)
-                            with gr.Column(scale=1, min_width=100):
-                                ollama_settings_button_cn = gr.Button("⚙️ Ollama Settings")
-                        
-                        ollama_components_cn = create_ollama_settings()
-                        
-                        ollama_settings_button_cn.click(
-                            fn=toggle_ollama_settings,
-                            inputs=[ollama_components_cn[4]],
-                            outputs=ollama_components_cn
-                        )
+                        with gr.Group():
+                            prompt_cn = gr.Textbox(label="Prompt", lines=2)
+                            with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_cn:
+                                ollama_components_cn = create_ollama_settings()
+                            with gr.Row():
+                                enhance_ollama_cn = gr.Button("Enhance prompt with Ollama")
                         
                         ollama_components_cn[2].click(
                             fn=save_settings,
-                            inputs=[ollama_components_cn[0], ollama_components_cn[1], ollama_components_cn[4]],
-                            outputs=ollama_components_cn
+                            inputs=[ollama_components_cn[0], ollama_components_cn[1]],
+                            outputs=[ollama_section_cn]
                         )
                         
                         control_image = gr.Image(label="Control Image", type="pil")
@@ -510,6 +476,11 @@ def create_ui():
                     with gr.Column():
                         output_image_cn = gr.Image(label="Generated Image")
                         output_message_cn = gr.Textbox(label="Status")
+                enhance_ollama_cn.click(
+                    fn=enhance_prompt,
+                    inputs=[prompt, ollama_components_cn[0], ollama_components_cn[1]],
+                    outputs=prompt_cn
+                )
                 generate_button_cn.click(
                     fn=generate_image_controlnet_gradio,
                     inputs=[
@@ -525,7 +496,6 @@ def create_ui():
                         lora_files_cn,
                         metadata_cn,
                         save_canny,
-                        use_ollama_cn,
                         ollama_components_cn[0],
                         ollama_components_cn[1],
                     ],
