@@ -6,6 +6,7 @@ from huggingface_hub import hf_hub_download
 import ollama
 import json
 from functools import partial
+import mlx.core as mx
 
 from mflux.config.model_config import ModelConfig
 from mflux.config.config import Config, ConfigControlnet
@@ -18,8 +19,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
-
-DEFAULT_OLLAMA_MODEL = 'qwen2.5:3b'
 
 class CustomModelConfig:
     def __init__(self, model_name, alias, num_train_steps, max_sequence_length):
@@ -108,15 +107,19 @@ def load_ollama_settings():
         with open('ollama_settings.json', 'r') as f:
             settings = json.load(f)
     except FileNotFoundError:
-        settings = {'model': DEFAULT_OLLAMA_MODEL}
+        _, default_model = get_available_ollama_models()
+        settings = {'model': default_model}
     
     settings['system_prompt'] = read_system_prompt()
     return settings
 
 def create_ollama_settings():
     settings = load_ollama_settings()
+    available_models, _ = get_available_ollama_models()
     ollama_model = gr.Dropdown(
-        choices=get_available_ollama_models(), label="Ollama Model"
+        choices=available_models,
+        value=settings['model'],
+        label="Ollama Model"
     )
     system_prompt = gr.Textbox(
         label="System Prompt", lines=10, value=settings['system_prompt']
@@ -146,9 +149,27 @@ def enhance_prompt(prompt, ollama_model, system_prompt):
         gr.Error(f"Error while improving prompt: {str(e)}")
         return prompt
 
+def print_memory_usage(label):
+    try:
+        active_memory = mx.metal.get_active_memory() / 1e6
+        peak_memory = mx.metal.get_peak_memory() / 1e6
+        print(f"{label} - Active memory: {active_memory:.2f} MB, Peak memory: {peak_memory:.2f} MB")
+    except AttributeError:
+        print(f"{label} - Unable to get memory usage information")
+
 def generate_image_gradio(
     prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt
 ):
+    print(f"\n--- Generating image (Advanced) ---")
+    print(f"Model: {model}")
+    print(f"Prompt: {prompt}")
+    print(f"Dimensions: {height}x{width}")
+    print(f"Steps: {steps}")
+    print(f"Guidance: {guidance}")
+    print(f"LoRA files: {lora_files}")
+    print_memory_usage("Before generation")
+
+    start_time = time.time()
 
     lora_paths = lora_files if lora_files else None
 
@@ -163,6 +184,8 @@ def generate_image_gradio(
         quantize = None
 
     flux = get_or_create_flux(model, quantize, None, lora_paths, None)
+
+    print_memory_usage("After creating flux")
 
     if steps is None:
         steps = 4 if model == "schnell" else 14
@@ -182,9 +205,21 @@ def generate_image_gradio(
         ),
     )
 
+    print_memory_usage("After generating image")
+
     image.image.save(output_path)
 
-    return image.image, output_filename, prompt, message
+    print_memory_usage("After saving image")
+
+    clear_flux_cache()
+
+    print_memory_usage("After clearing cache")
+
+    end_time = time.time()
+    generation_time = end_time - start_time
+    print(f"Generation time: {generation_time:.2f} seconds")
+
+    return image.image, output_filename, prompt
 
 def generate_image_controlnet_gradio(
     prompt,
@@ -202,13 +237,30 @@ def generate_image_controlnet_gradio(
     ollama_model,
     system_prompt
 ):
+    print(f"\n--- Generating image (ControlNet) ---")
+    print(f"Model: {model}")
+    print(f"Prompt: {prompt}")
+    print(f"Dimensions: {height}x{width}")
+    print(f"Steps: {steps}")
+    print(f"Guidance: {guidance}")
+    print(f"ControlNet Strength: {controlnet_strength}")
+    print(f"LoRA files: {lora_files}")
+    print_memory_usage("Before generation")
 
-    lora_paths = lora_files if lora_files else None
+    start_time = time.time()
+
+    lora_dict = dict(get_available_lora_files())
+    
+    lora_files = lora_files or []
+    
+    lora_paths = [lora_dict[lora] for lora in lora_files if lora in lora_dict]
 
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
     flux = get_or_create_flux(model, None, None, lora_paths, None, is_controlnet=True)
+
+    print_memory_usage("After creating flux")
 
     if steps is None:
         steps = 4 if model == "schnell" else 14
@@ -238,11 +290,21 @@ def generate_image_controlnet_gradio(
             output=output_path
         )
         
+        print_memory_usage("After generating image")
+        
         os.remove(control_image_path)
         
-        return generated_image.image, f"Image generated successfully! Saved as {output_filename}", prompt, message
+        clear_flux_cache()
+        
+        print_memory_usage("After clearing cache")
+
+        end_time = time.time()
+        generation_time = end_time - start_time
+        print(f"Generation time: {generation_time:.2f} seconds")
+
+        return generated_image.image, f"Image generated successfully! Saved as {output_filename}", prompt
     except Exception as e:
-        return None, f"Error generating image: {str(e)}", prompt, message
+        return None, f"Error generating image: {str(e)}", prompt
 
 def save_quantized_model_gradio(model, quantize, save_path):
     quantize = int(quantize)
@@ -257,7 +319,19 @@ def save_quantized_model_gradio(model, quantize, save_path):
     return f"Model saved at {save_path}"
 
 def simple_generate_image(prompt, model, height, width, lora_files, ollama_model, system_prompt):
+    print(f"\n--- Generating image ---")
+    print(f"Model: {model}")
+    print(f"Prompt: {prompt}")
+    print(f"Dimensions: {height}x{width}")
+    print(f"LoRA files: {lora_files}")
+    print_memory_usage("Before generation")
+
+    start_time = time.time()
+
     lora_dict = dict(get_available_lora_files())
+    
+    lora_files = lora_files or []
+    
     lora_paths = [lora_dict[lora] for lora in lora_files if lora in lora_dict]
 
     if "dev" in model:
@@ -297,15 +371,27 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
 
     image.image.save(output_path)
 
+    print_memory_usage("After creating flux")
+    print_memory_usage("After generating image")
+    print_memory_usage("After saving image")
+    print_memory_usage("After clearing cache")
+
+    end_time = time.time()
+    generation_time = end_time - start_time
+    print(f"Generation time: {generation_time:.2f} seconds")
+
+    clear_flux_cache()
+
     return image.image, output_filename, prompt
 
 def get_available_ollama_models():
     try:
         models = ollama.list()
-        return [model['name'] for model in models['models']]
+        available_models = [model['name'] for model in models['models']]
+        return available_models, available_models[0] if available_models else None
     except Exception as e:
         print(f"Error fetching Ollama models: {e}")
-        return [DEFAULT_OLLAMA_MODEL]
+        return [], None
 
 def save_ollama_settings(model, system_prompt):
     with open('ollama_settings.json', 'w') as f:
@@ -323,6 +409,22 @@ def read_system_prompt():
     except FileNotFoundError:
         print("system_prompt.md niet gevonden. Een lege prompt wordt gebruikt.")
         return ""
+
+def clear_flux_cache():
+    print_memory_usage("Before clearing flux cache")
+    global flux_cache
+    flux_cache.clear()
+    import gc
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.metal.get_active_memory()
+        mx.metal.reset_peak_memory()
+    except ImportError:
+        pass
+    except AttributeError:
+        print("Waarschuwing: Sommige MLX geheugenbeheerfuncties zijn niet beschikbaar.")
+    print_memory_usage("After clearing flux cache")
 
 def create_ui():
     with gr.Blocks() as demo:
@@ -343,7 +445,11 @@ def create_ui():
                             outputs=[ollama_section_simple]
                         )
                         
-                        model_simple = gr.Dropdown(choices=["schnell", "dev"], label="Model", value="schnell")
+                        model_simple = gr.Dropdown(
+                            choices=get_available_models(),
+                            label="Model",
+                            value="schnell"
+                        )
                         height_simple = gr.Number(label="Height", value=1024, precision=0)
                         width_simple = gr.Number(label="Width", value=1024, precision=0)
                         lora_files_simple = gr.Dropdown(
@@ -356,7 +462,6 @@ def create_ui():
                     with gr.Column():
                         output_image_simple = gr.Image(label="Generated Image")
                         output_filename_simple = gr.Textbox(label="Saved Image Filename")
-                        # Verwijder de status_box_simple regel
 
                 enhance_ollama_simple.click(
                     fn=enhance_prompt,
@@ -396,7 +501,7 @@ def create_ui():
                         model = gr.Dropdown(
                             choices=get_available_models(),
                             label="Model",
-                            value="dev"
+                            value="schnell"
                         )
                         seed = gr.Textbox(label="Seed (optional)", value="")
                         height = gr.Number(label="Height", value=1024, precision=0)
@@ -457,7 +562,7 @@ def create_ui():
                         model_cn = gr.Dropdown(
                             choices=get_available_models(),
                             label="Model",
-                            value="dev"
+                            value="schnell"
                         )
                         seed_cn = gr.Textbox(label="Seed (optional)", value="")
                         height_cn = gr.Number(label="Height", value=1024, precision=0)
