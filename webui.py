@@ -318,6 +318,15 @@ def save_quantized_model_gradio(model, quantize, save_path):
 
     return f"Model saved at {save_path}"
 
+def process_lora_files(selected_loras):
+    lora_dict = dict(get_available_lora_files())
+    valid_loras = []
+    for lora in selected_loras:
+        matching_loras = [path for path, name in lora_dict.items() if name == lora]
+        if matching_loras:
+            valid_loras.extend(matching_loras)
+    return valid_loras
+
 def simple_generate_image(prompt, model, height, width, lora_files, ollama_model, system_prompt):
     print(f"\n--- Generating image ---")
     print(f"Model: {model}")
@@ -328,11 +337,9 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
 
     start_time = time.time()
 
-    lora_dict = dict(get_available_lora_files())
-    
-    lora_files = lora_files or []
-    
-    lora_paths = [lora_dict[lora] for lora in lora_files if lora in lora_dict]
+    valid_loras = process_lora_files(lora_files)
+    lora_paths = valid_loras if valid_loras else None
+    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
     if "dev" in model:
         steps = 20
@@ -346,12 +353,13 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
     else:
         quantize = None
 
-    flux = get_or_create_flux(
-        model,
-        quantize,
-        None,
-        lora_paths,
-        None
+    custom_config = get_custom_model_config(model)
+    flux = Flux1(
+        model_config=custom_config,
+        quantize=quantize,
+        local_path=None,
+        lora_paths=lora_paths,
+        lora_scales=lora_scales,
     )
 
     timestamp = int(time.time())
@@ -371,7 +379,6 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
 
     image.image.save(output_path)
 
-    print_memory_usage("After creating flux")
     print_memory_usage("After generating image")
     print_memory_usage("After saving image")
     print_memory_usage("After clearing cache")
