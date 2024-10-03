@@ -7,6 +7,7 @@ import ollama
 import json
 from functools import partial
 import mlx.core as mx
+import gc
 
 from mflux.config.model_config import ModelConfig
 from mflux.config.config import Config, ConfigControlnet
@@ -59,33 +60,21 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     except Exception as e:
         return f"Error downloading model: {str(e)}"
 
-flux_cache = {}
-
 def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
-    key = (
-        model,
-        quantize,
-        path,
-        tuple(lora_paths) if lora_paths else None,
-        tuple(lora_scales) if lora_scales else None,
-        is_controlnet
+    FluxClass = Flux1Controlnet if is_controlnet else Flux1
+    try:
+        custom_config = get_custom_model_config(model)
+    except ValueError:
+        custom_config = CustomModelConfig(model, model, 1000, 512)
+        print(f"Waarschuwing: Onbekend model '{model}' gebruikt. Standaard configuratie toegepast.")
+    
+    return FluxClass(
+        model_config=custom_config,
+        quantize=quantize,
+        local_path=path,
+        lora_paths=lora_paths,
+        lora_scales=lora_scales,
     )
-    if key not in flux_cache:
-        FluxClass = Flux1Controlnet if is_controlnet else Flux1
-        try:
-            custom_config = get_custom_model_config(model)
-        except ValueError:
-            custom_config = CustomModelConfig(model, model, 1000, 512)
-            print(f"Waarschuwing: Onbekend model '{model}' gebruikt. Standaard configuratie toegepast.")
-        
-        flux_cache[key] = FluxClass(
-            model_config=custom_config,
-            quantize=quantize,
-            local_path=path,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales,
-        )
-    return flux_cache[key]
 
 def get_available_lora_files():
     return [(str(f), f.stem) for f in Path(LORA_DIR).rglob("*.safetensors")]
@@ -342,59 +331,74 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
 
     start_time = time.time()
 
-    valid_loras = process_lora_files(lora_files)
-    lora_paths = valid_loras if valid_loras else None
-    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
+    try:
+        valid_loras = process_lora_files(lora_files)
+        lora_paths = valid_loras if valid_loras else None
+        lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
-    if "dev" in model:
-        steps = 20
-    else:
-        steps = 4
+        if "dev" in model:
+            steps = 20
+        else:
+            steps = 4
 
-    if "8-bit" in model:
-        quantize = 8
-    elif "4-bit" in model:
-        quantize = 4
-    else:
-        quantize = None
+        if "8-bit" in model:
+            quantize = 8
+        elif "4-bit" in model:
+            quantize = 4
+        else:
+            quantize = None
 
-    custom_config = get_custom_model_config(model)
-    flux = Flux1(
-        model_config=custom_config,
-        quantize=quantize,
-        local_path=None,
-        lora_paths=lora_paths,
-        lora_scales=lora_scales,
-    )
+        custom_config = get_custom_model_config(model)
+        flux = Flux1(
+            model_config=custom_config,
+            quantize=quantize,
+            local_path=None,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+        )
 
-    timestamp = int(time.time())
-    output_filename = f"generated_simple_{timestamp}.png"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+        timestamp = int(time.time())
+        output_filename = f"generated_simple_{timestamp}.png"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-    image = flux.generate_image(
-        seed=int(time.time()),
-        prompt=prompt,
-        config=Config(
-            num_inference_steps=steps,
-            height=height,
-            width=width,
-            guidance=7.5,
-        ),
-    )
+        image = flux.generate_image(
+            seed=int(time.time()),
+            prompt=prompt,
+            config=Config(
+                num_inference_steps=steps,
+                height=height,
+                width=width,
+                guidance=7.5,
+            ),
+        )
 
-    image.image.save(output_path)
+        print_memory_usage("After generating image")
+        
+        image.image.save(output_path)
 
-    print_memory_usage("After generating image")
-    print_memory_usage("After saving image")
-    print_memory_usage("After clearing cache")
+        print_memory_usage("After saving image")
+        
+        del flux
+        del image
+        
+        gc.collect()
+        
+        force_mlx_cleanup()
 
-    end_time = time.time()
-    generation_time = end_time - start_time
-    print(f"Generation time: {generation_time:.2f} seconds")
+        print_memory_usage("After cleanup")
 
-    clear_flux_cache()
+        end_time = time.time()
+        generation_time = end_time - start_time
+        print(f"Generation time: {generation_time:.2f} seconds")
 
-    return image.image, output_filename, prompt
+        return output_path, output_filename, prompt
+
+    except Exception as e:
+        print(f"Error in image generation: {str(e)}")
+        return None, None, prompt
+    finally:
+        force_mlx_cleanup()
+        gc.collect()
 
 def get_available_ollama_models():
     try:
@@ -425,18 +429,39 @@ def read_system_prompt():
 def clear_flux_cache():
     print_memory_usage("Before clearing flux cache")
     global flux_cache
+    
     flux_cache.clear()
-    import gc
+    
     gc.collect()
+    
     try:
-        import mlx.core as mx
-        mx.metal.get_active_memory()
         mx.metal.reset_peak_memory()
-    except ImportError:
-        pass
-    except AttributeError:
-        print("Waarschuwing: Sommige MLX geheugenbeheerfuncties zijn niet beschikbaar.")
+        
+        mx.eval(mx.zeros(1))
+        
+        if hasattr(mx, 'clear_memory_pool'):
+            mx.clear_memory_pool()
+        
+        if hasattr(mx, 'metal'):
+            mx.metal.device_reset()
+        
+    except AttributeError as e:
+        print(f"Waarschuwing: Sommige MLX geheugenbeheerfuncties zijn niet beschikbaar: {e}")
+    
+    gc.collect()
+    
     print_memory_usage("After clearing flux cache")
+
+def force_mlx_cleanup():
+    mx.eval(mx.zeros(1))
+    
+    if hasattr(mx.metal, 'clear_cache'):
+        mx.metal.clear_cache()
+    
+    if hasattr(mx.metal, 'reset_peak_memory'):
+        mx.metal.reset_peak_memory()
+    
+    gc.collect()
 
 def create_ui():
     with gr.Blocks() as demo:
