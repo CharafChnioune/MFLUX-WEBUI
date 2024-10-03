@@ -319,7 +319,12 @@ def save_quantized_model_gradio(model, quantize, save_path):
     return f"Model saved at {save_path}"
 
 def process_lora_files(selected_loras):
-    lora_dict = dict(get_available_lora_files())
+    if not selected_loras:
+        return []
+    lora_files = get_available_lora_files()
+    if not lora_files:
+        return []
+    lora_dict = dict(lora_files)
     valid_loras = []
     for lora in selected_loras:
         matching_loras = [path for path, name in lora_dict.items() if name == lora]
