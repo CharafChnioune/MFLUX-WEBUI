@@ -8,6 +8,7 @@ import json
 from functools import partial
 import mlx.core as mx
 import gc
+from functools import lru_cache
 
 from mflux.config.model_config import ModelConfig
 from mflux.config.config import Config, ConfigControlnet
@@ -20,6 +21,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
+
+flux_cache = {}
 
 class CustomModelConfig:
     def __init__(self, model_name, alias, num_train_steps, max_sequence_length):
@@ -60,7 +63,18 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     except Exception as e:
         return f"Error downloading model: {str(e)}"
 
-def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
+@lru_cache(maxsize=None)
+def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet=False):
+    global flux_cache
+    
+    # Converteer tuples terug naar lijsten
+    lora_paths = list(lora_paths_tuple) if lora_paths_tuple else None
+    lora_scales = list(lora_scales_tuple) if lora_scales_tuple else None
+    
+    key = (model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet)
+    if key in flux_cache:
+        return flux_cache[key]
+    
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
     # Scheid de quantisatie-informatie van de modelnaam
@@ -78,13 +92,16 @@ def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_contro
     elif "-4-bit" in model:
         quantize = 4
     
-    return FluxClass(
+    flux = FluxClass(
         model_config=custom_config,
         quantize=quantize,
         local_path=path,
         lora_paths=lora_paths,
         lora_scales=lora_scales,
     )
+    
+    flux_cache[key] = flux
+    return flux
 
 def get_available_lora_files():
     return [(str(f), f.stem) for f in Path(LORA_DIR).rglob("*.safetensors")]
@@ -175,7 +192,7 @@ def generate_image_gradio(
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    flux = get_or_create_flux(model, None, None, lora_paths, None)
+    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, None)
 
     print_memory_usage("After creating flux")
 
@@ -250,7 +267,7 @@ def generate_image_controlnet_gradio(
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    flux = get_or_create_flux(model, None, None, lora_paths, None, is_controlnet=True)
+    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, None, is_controlnet=True)
 
     print_memory_usage("After creating flux")
 
@@ -347,7 +364,7 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
         else:
             steps = 4
 
-        flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
+        flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None)
 
         timestamp = int(time.time())
         output_filename = f"generated_simple_{timestamp}.png"
@@ -419,7 +436,6 @@ def read_system_prompt():
         return ""
 
 def clear_flux_cache():
-    print_memory_usage("Before clearing flux cache")
     global flux_cache
     
     flux_cache.clear()
@@ -454,6 +470,9 @@ def force_mlx_cleanup():
         mx.metal.reset_peak_memory()
     
     gc.collect()
+
+def update_guidance_visibility(model):
+    return gr.update(visible="dev" in model)
 
 def create_ui():
     with gr.Blocks() as demo:
@@ -548,7 +567,7 @@ def create_ui():
                             width = gr.Number(label="Width", value=576, precision=0)
                             height = gr.Number(label="Height", value=1024, precision=0)
                         steps = gr.Textbox(label="Inference Steps (optional)", value="")
-                        guidance = gr.Number(label="Guidance Scale", value=3.5)
+                        guidance = gr.Number(label="Guidance Scale", value=3.5, visible=False)
                         lora_files = gr.Dropdown(
                             choices=[file[1] for file in get_available_lora_files()],
                             label="Select LoRA Files",
@@ -559,6 +578,12 @@ def create_ui():
                     with gr.Column():
                         output_image = gr.Image(label="Generated Image")
                         output_filename = gr.Textbox(label="Saved Image Filename")
+
+                model.change(
+                    fn=update_guidance_visibility,
+                    inputs=[model],
+                    outputs=[guidance]
+                )
 
                 enhance_ollama.click(
                     fn=enhance_prompt,
@@ -610,7 +635,7 @@ def create_ui():
                             width_cn = gr.Number(label="Width", value=576, precision=0)
                             height_cn = gr.Number(label="Height", value=1024, precision=0)
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
-                        guidance_cn = gr.Number(label="Guidance Scale", value=3.5)
+                        guidance_cn = gr.Number(label="Guidance Scale", value=3.5, visible=False)
                         controlnet_strength = gr.Number(label="ControlNet Strength", value=0.7)
                         lora_files_cn = gr.Dropdown(
                             choices=[file[1] for file in get_available_lora_files()],
