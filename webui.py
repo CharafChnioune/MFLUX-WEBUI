@@ -333,6 +333,7 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
     start_time = time.time()
 
     try:
+        # Parse the selected image format
         width, height = map(int, image_format.split('(')[1].split(')')[0].split('x'))
 
         valid_loras = process_lora_files(lora_files)
