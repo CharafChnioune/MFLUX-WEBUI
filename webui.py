@@ -63,7 +63,6 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
 def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
-    # Scheid de quantisatie-informatie van de modelnaam
     base_model = model.replace("-8-bit", "").replace("-4-bit", "")
     
     try:
@@ -72,7 +71,6 @@ def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_contro
         custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
         print(f"Waarschuwing: Onbekend model '{base_model}' gebruikt. Standaard configuratie toegepast.")
     
-    # Bepaal de quantisatie op basis van de originele modelnaam
     if "-8-bit" in model:
         quantize = 8
     elif "-4-bit" in model:
@@ -324,17 +322,19 @@ def process_lora_files(selected_loras):
             valid_loras.extend(matching_loras)
     return valid_loras
 
-def simple_generate_image(prompt, model, height, width, lora_files, ollama_model, system_prompt):
+def simple_generate_image(prompt, model, image_format, lora_files, ollama_model, system_prompt):
     print(f"\n--- Generating image ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
-    print(f"Dimensions: {height}x{width}")
+    print(f"Image Format: {image_format}")
     print(f"LoRA files: {lora_files}")
     print_memory_usage("Before generation")
 
     start_time = time.time()
 
     try:
+        width, height = map(int, image_format.split('(')[1].split(')')[0].split('x'))
+
         valid_loras = process_lora_files(lora_files)
         lora_paths = valid_loras if valid_loras else None
         lora_scales = [1.0] * len(valid_loras) if valid_loras else None
@@ -476,8 +476,20 @@ def create_ui():
                             label="Model",
                             value="schnell"
                         )
-                        height_simple = gr.Number(label="Height", value=1024, precision=0)
-                        width_simple = gr.Number(label="Width", value=1024, precision=0)
+                        image_format = gr.Dropdown(
+                            choices=[
+                                "Portrait (576x1024)",
+                                "Landscape (1024x576)",
+                                "Background (1920x1080)",
+                                "Square (1024x1024)",
+                                "Poster (1080x1920)",
+                                "Wide Screen (2560x1440)",
+                                "Ultra Wide Screen (3440x1440)",
+                                "Banner (728x90)",
+                            ],
+                            label="Image Format",
+                            value="Portrait (576x1024)"
+                        )
                         lora_files_simple = gr.Dropdown(
                             choices=[file[1] for file in get_available_lora_files()], 
                             label="Select LoRA Files", 
@@ -499,8 +511,7 @@ def create_ui():
                     inputs=[
                         prompt_simple,
                         model_simple,
-                        height_simple,
-                        width_simple,
+                        image_format,
                         lora_files_simple,
                         ollama_components_simple[0],
                         ollama_components_simple[1],
@@ -530,8 +541,9 @@ def create_ui():
                             value="schnell"
                         )
                         seed = gr.Textbox(label="Seed (optional)", value="")
-                        height = gr.Number(label="Height", value=1024, precision=0)
-                        width = gr.Number(label="Width", value=1024, precision=0)
+                        with gr.Row():
+                            width = gr.Number(label="Width", value=576, precision=0)
+                            height = gr.Number(label="Height", value=1024, precision=0)
                         steps = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance = gr.Number(label="Guidance Scale", value=3.5)
                         lora_files = gr.Dropdown(
@@ -591,8 +603,9 @@ def create_ui():
                             value="schnell"
                         )
                         seed_cn = gr.Textbox(label="Seed (optional)", value="")
-                        height_cn = gr.Number(label="Height", value=1024, precision=0)
-                        width_cn = gr.Number(label="Width", value=1024, precision=0)
+                        with gr.Row():
+                            width_cn = gr.Number(label="Width", value=576, precision=0)
+                            height_cn = gr.Number(label="Height", value=1024, precision=0)
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance_cn = gr.Number(label="Guidance Scale", value=3.5)
                         controlnet_strength = gr.Number(label="ControlNet Strength", value=0.7)
