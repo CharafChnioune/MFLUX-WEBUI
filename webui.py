@@ -67,7 +67,6 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
 def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet=False):
     global flux_cache
     
-    # Converteer tuples terug naar lijsten
     lora_paths = list(lora_paths_tuple) if lora_paths_tuple else None
     lora_scales = list(lora_scales_tuple) if lora_scales_tuple else None
     
@@ -77,7 +76,6 @@ def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tupl
     
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
-    # Scheid de quantisatie-informatie van de modelnaam
     base_model = model.replace("-8-bit", "").replace("-4-bit", "")
     
     try:
@@ -86,7 +84,6 @@ def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tupl
         custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
         print(f"Waarschuwing: Onbekend model '{base_model}' gebruikt. Standaard configuratie toegepast.")
     
-    # Bepaal de quantisatie op basis van de originele modelnaam
     if "-8-bit" in model:
         quantize = 8
     elif "-4-bit" in model:
@@ -258,16 +255,18 @@ def generate_image_controlnet_gradio(
 
     start_time = time.time()
 
-    lora_dict = dict(get_available_lora_files())
-    
-    lora_files = lora_files or []
-    
-    lora_paths = [lora_dict[lora] for lora in lora_files if lora in lora_dict]
+    valid_loras = process_lora_files(lora_files)
+    lora_paths = valid_loras if valid_loras else None
+    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
+
+    # Gebruik guidance alleen als het een dev model is
+    if "dev" not in model:
+        guidance = None
 
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, None, is_controlnet=True)
+    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None, is_controlnet=True)
 
     print_memory_usage("After creating flux")
 
@@ -314,6 +313,20 @@ def generate_image_controlnet_gradio(
         return generated_image.image, f"Image generated successfully! Saved as {output_filename}", prompt
     except Exception as e:
         return None, f"Error generating image: {str(e)}", prompt
+
+def process_lora_files(selected_loras):
+    if not selected_loras:
+        return []
+    lora_files = get_available_lora_files()
+    if not lora_files:
+        return []
+    lora_dict = dict(lora_files)
+    valid_loras = []
+    for lora in selected_loras:
+        matching_loras = [path for path, name in lora_dict.items() if name == lora]
+        if matching_loras:
+            valid_loras.extend(matching_loras)
+    return valid_loras
 
 def save_quantized_model_gradio(model, quantize, save_path):
     quantize = int(quantize)
