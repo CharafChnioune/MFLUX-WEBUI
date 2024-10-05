@@ -63,6 +63,7 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
 def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
+    # Scheid de quantisatie-informatie van de modelnaam
     base_model = model.replace("-8-bit", "").replace("-4-bit", "")
     
     try:
@@ -71,6 +72,7 @@ def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_contro
         custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
         print(f"Waarschuwing: Onbekend model '{base_model}' gebruikt. Standaard configuratie toegepast.")
     
+    # Bepaal de quantisatie op basis van de originele modelnaam
     if "-8-bit" in model:
         quantize = 8
     elif "-4-bit" in model:
@@ -486,7 +488,7 @@ def create_ui():
                                 "Poster (1080x1920)",
                                 "Wide Screen (2560x1440)",
                                 "Ultra Wide Screen (3440x1440)",
-                                "Banner (728x90)",
+                                "Banner (728x90)"
                             ],
                             label="Image Format",
                             value="Portrait (576x1024)"
