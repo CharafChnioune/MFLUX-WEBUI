@@ -62,11 +62,21 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
 
 def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
+    
+    # Scheid de quantisatie-informatie van de modelnaam
+    base_model = model.replace("-8-bit", "").replace("-4-bit", "")
+    
     try:
-        custom_config = get_custom_model_config(model)
+        custom_config = get_custom_model_config(base_model)
     except ValueError:
-        custom_config = CustomModelConfig(model, model, 1000, 512)
-        print(f"Waarschuwing: Onbekend model '{model}' gebruikt. Standaard configuratie toegepast.")
+        custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
+        print(f"Waarschuwing: Onbekend model '{base_model}' gebruikt. Standaard configuratie toegepast.")
+    
+    # Bepaal de quantisatie op basis van de originele modelnaam
+    if "-8-bit" in model:
+        quantize = 8
+    elif "-4-bit" in model:
+        quantize = 4
     
     return FluxClass(
         model_config=custom_config,
@@ -165,14 +175,7 @@ def generate_image_gradio(
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    if "8-bit" in model:
-        quantize = 8
-    elif "4-bit" in model:
-        quantize = 4
-    else:
-        quantize = None
-
-    flux = get_or_create_flux(model, quantize, None, lora_paths, None)
+    flux = get_or_create_flux(model, None, None, lora_paths, None)
 
     print_memory_usage("After creating flux")
 
@@ -341,21 +344,7 @@ def simple_generate_image(prompt, model, height, width, lora_files, ollama_model
         else:
             steps = 4
 
-        if "8-bit" in model:
-            quantize = 8
-        elif "4-bit" in model:
-            quantize = 4
-        else:
-            quantize = None
-
-        custom_config = get_custom_model_config(model)
-        flux = Flux1(
-            model_config=custom_config,
-            quantize=quantize,
-            local_path=None,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales,
-        )
+        flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
 
         timestamp = int(time.time())
         output_filename = f"generated_simple_{timestamp}.png"
@@ -662,7 +651,7 @@ def create_ui():
                         download_button = gr.Button("Download and Add Model")
                     with gr.Column():
                         download_output = gr.Textbox(label="Download Status")
-                
+
                 download_button.click(
                     fn=download_and_save_model,
                     inputs=[hf_model_name, alias, num_train_steps, max_sequence_length],
