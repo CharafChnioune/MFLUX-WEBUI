@@ -21,6 +21,7 @@ MFLUX WebUI is a comprehensive interface for the MFLUX image generation system. 
 - 🌈 User-friendly UI suitable for both beginners and advanced users
 - 🔧 Customizable settings for precise control over image generation
 - 🤖 Ollama integration for prompt enhancement
+- 📥 LoRA download functionality
 
 ## Installation
 
@@ -112,6 +113,8 @@ The Models tab enables you to manage models:
   - Choose which model to quantize ("dev" or "schnell").
   - Select the quantization level (4-bit or 8-bit).
   - Specify where to save the quantized model.
+  - View the quantization output in a dedicated textbox.
+- **Download LoRA**: Download LoRA models directly from within the interface.
 
 ## LoRA Integration
 
@@ -119,6 +122,7 @@ LoRA (Low-Rank Adaptation) allows for fine-tuned models to be used in image gene
 
 1. Place your LoRA files (`.safetensors`) in the `lora` directory.
 2. Select the desired LoRA file(s) from the dropdown menu in the WebUI.
+3. Use the LoRA download functionality in the Models tab to easily add new LoRA models.
 
 ## Ollama Integration
 
