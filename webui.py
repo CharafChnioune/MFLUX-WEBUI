@@ -18,13 +18,15 @@ from mflux.config.config import Config, ConfigControlnet
 from mflux.flux.flux import Flux1
 from mflux.controlnet.flux_controlnet import Flux1Controlnet
 from tqdm import tqdm
-from huggingface_hub import HfApi, HfFolder
+from huggingface_hub import HfApi, HfFolder, snapshot_download
+from contextlib import contextmanager
+from PIL import Image
 
 LORA_DIR = os.path.join(os.path.dirname(__file__), "lora")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+MODELS_DIR = Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface/hub"))
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 flux_cache = {}
@@ -53,8 +55,6 @@ def get_custom_model_config(model_alias):
     if config is None:
         raise ValueError(f"Invalid model alias: {model_alias}. Available aliases are: {', '.join(models.keys())}")
     return config
-
-from huggingface_hub import snapshot_download
 
 def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_length):
     try:
@@ -195,9 +195,46 @@ def print_memory_usage(label):
     except AttributeError:
         print(f"{label} - Unable to get memory usage information")
 
-def generate_image_gradio(
-    prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt
-):
+@contextmanager
+def mflux_context(model, quantize=None, path=None, lora_paths=None, lora_scales=None, is_controlnet=False):
+    model_path = os.path.join(MODELS_DIR, model)
+    command = ["mflux-generate", "--model", model, "--path", model_path]
+    
+    if lora_paths:
+        command.extend(["--lora-paths"] + lora_paths)
+    if lora_scales:
+        command.extend(["--lora-scales"] + [str(scale) for scale in lora_scales])
+    if is_controlnet:
+        command[0] = "mflux-generate-controlnet"
+    
+    try:
+        yield command
+    finally:
+        clear_flux_cache()
+        force_mlx_cleanup()
+
+def ensure_model_downloaded(model_alias):
+    model_config = get_custom_model_config(model_alias)
+    model_path = os.path.join(MODELS_DIR, model_alias)
+    
+    if not os.path.exists(model_path):
+        print(f"Model {model_alias} not found. Downloading...")
+        try:
+            snapshot_download(
+                repo_id=model_config.model_name,
+                local_dir=model_path,
+                local_dir_use_symlinks=False
+            )
+            print(f"Model {model_alias} successfully downloaded to {model_path}")
+        except Exception as e:
+            print(f"Error downloading model {model_alias}: {str(e)}")
+            return None
+    else:
+        print(f"Model {model_alias} found at {model_path}")
+    
+    return model_path
+
+def generate_image_gradio(prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt):
     print(f"\n--- Generating image (Advanced) ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
@@ -205,70 +242,65 @@ def generate_image_gradio(
     print(f"Steps: {steps}")
     print(f"Guidance: {guidance}")
     print(f"LoRA files: {lora_files}")
-    print_memory_usage("Before generation")
 
-    start_time = time.time()
-
-    valid_loras = process_lora_files(lora_files)
-    lora_paths = valid_loras if valid_loras else None
-    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
-
-    seed = None if seed == "" else int(seed)
-    steps = None if steps == "" else int(steps)
-
-    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None)
-
-    print_memory_usage("After creating flux")
-
-    if steps is None:
-        steps = 4 if model == "schnell" else 14
+    base_model = "dev" if "dev" in model else "schnell"
+    model_path = ensure_model_downloaded(base_model)
+    if not model_path:
+        return None, None, "Failed to download or locate the model. Please check your internet connection and try again."
 
     timestamp = int(time.time())
     output_filename = f"generated_{timestamp}.png"
     output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-    image = flux.generate_image(
-        seed=int(time.time()) if seed is None else seed,
-        prompt=prompt,
-        config=Config(
-            num_inference_steps=steps,
-            height=height,
-            width=width,
-            guidance=guidance,
-        ),
-    )
+    command = [
+        "mflux-generate",
+        "--model", base_model,
+        "--path", model_path,
+        "--prompt", prompt,
+        "--height", str(height),
+        "--width", str(width),
+        "--output", output_path
+    ]
 
-    print_memory_usage("After generating image")
+    if "4-bit" in model:
+        command.extend(["-q", "4"])
+    elif "8-bit" in model:
+        command.extend(["-q", "8"])
 
-    image.image.save(output_path)
+    if seed:
+        command.extend(["--seed", str(seed)])
+    if steps:
+        command.extend(["--steps", str(steps)])
+    if guidance and "dev" in model:
+        command.extend(["--guidance", str(guidance)])
+    if metadata:
+        command.append("--metadata")
 
-    print_memory_usage("After saving image")
+    lora_paths = process_lora_files(lora_files)
+    if lora_paths:
+        command.extend(["--lora-paths"] + lora_paths)
+        command.extend(["--lora-scales"] + ["1.0"] * len(lora_paths))
 
-    clear_flux_cache()
-
-    print_memory_usage("After clearing cache")
-
-    end_time = time.time()
-    generation_time = end_time - start_time
-    print(f"Generation time: {generation_time:.2f} seconds")
-
-    return image.image, output_filename, prompt
+    try:
+        print(f"Executing command: {' '.join(command)}")
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        print(result.stdout)
+        
+        if os.path.exists(output_path):
+            return Image.open(output_path), output_filename, prompt
+        else:
+            print(f"Error: Output file not found: {output_path}")
+            return None, None, prompt
+    except subprocess.CalledProcessError as e:
+        print(f"Error running mflux-generate: {e}")
+        print(f"Error output: {e.stderr}")
+        return None, None, prompt
+    finally:
+        clear_flux_cache()
+        force_mlx_cleanup()
 
 def generate_image_controlnet_gradio(
-    prompt,
-    control_image,
-    model,
-    seed,
-    height,
-    width,
-    steps,
-    guidance,
-    controlnet_strength,
-    lora_files,
-    metadata,
-    save_canny,
-    ollama_model,
-    system_prompt
+    prompt, control_image, model, seed, height, width, steps, guidance, controlnet_strength, lora_files, metadata, save_canny, ollama_model, system_prompt
 ):
     print(f"\n--- Generating image (ControlNet) ---")
     print(f"Model: {model}")
@@ -282,63 +314,76 @@ def generate_image_controlnet_gradio(
 
     start_time = time.time()
 
-    valid_loras = process_lora_files(lora_files)
-    lora_paths = valid_loras if valid_loras else None
-    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
-
-    if "dev" not in model:
-        guidance = None
-
-    seed = None if seed == "" else int(seed)
-    steps = None if steps == "" else int(steps)
-
-    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None, is_controlnet=True)
-
-    print_memory_usage("After creating flux")
-
-    if steps is None:
-        steps = 4 if model == "schnell" else 14
-
-    timestamp = int(time.time())
-    output_filename = f"generated_controlnet_{timestamp}.png"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
-
     try:
         if control_image is None:
             raise ValueError("Control image is required for ControlNet generation")
 
+        timestamp = int(time.time())
         control_image_path = os.path.join(OUTPUT_DIR, f"control_image_{timestamp}.png")
         control_image.save(control_image_path)
 
-        generated_image = flux.generate_image(
-            seed=int(time.time()) if seed is None else seed,
-            prompt=prompt,
-            controlnet_image_path=control_image_path,
-            config=ConfigControlnet(
-                num_inference_steps=steps,
-                height=height,
-                width=width,
-                guidance=guidance,
-                controlnet_strength=controlnet_strength,
-            ),
-            output=output_path
-        )
-        
-        print_memory_usage("After generating image")
-        
-        os.remove(control_image_path)
-        
-        clear_flux_cache()
-        
-        print_memory_usage("After clearing cache")
+        output_filename = f"generated_controlnet_{timestamp}.png"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-        end_time = time.time()
-        generation_time = end_time - start_time
-        print(f"Generation time: {generation_time:.2f} seconds")
+        base_model = "dev" if "dev" in model else "schnell"
+        model_path = ensure_model_downloaded(base_model)
+        if not model_path:
+            raise ValueError("Failed to download or locate the model")
 
-        return generated_image.image, f"Image generated successfully! Saved as {output_filename}", prompt
+        command = [
+            "mflux-generate-controlnet",
+            "--model", base_model,
+            "--path", model_path,
+            "--prompt", prompt,
+            "--height", str(height),
+            "--width", str(width),
+            "--output", output_path,
+            "--controlnet-image-path", control_image_path,
+            "--controlnet-strength", str(controlnet_strength)
+        ]
+
+        if "4-bit" in model:
+            command.extend(["-q", "4"])
+        elif "8-bit" in model:
+            command.extend(["-q", "8"])
+
+        if seed:
+            command.extend(["--seed", str(seed)])
+        if steps:
+            command.extend(["--steps", str(steps)])
+        if guidance and "dev" in model:
+            command.extend(["--guidance", str(guidance)])
+        if metadata:
+            command.append("--metadata")
+        if save_canny:
+            command.append("--controlnet-save-canny")
+
+        lora_paths = process_lora_files(lora_files)
+        if lora_paths:
+            command.extend(["--lora-paths"] + lora_paths)
+            command.extend(["--lora-scales"] + ["1.0"] * len(lora_paths))
+
+        print(f"Executing command: {' '.join(command)}")
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        print(result.stdout)
+        
+        if os.path.exists(output_path):
+            generated_image = Image.open(output_path)
+            canny_image_path = os.path.join(OUTPUT_DIR, f"canny_{timestamp}.png")
+            canny_image = Image.open(canny_image_path) if os.path.exists(canny_image_path) else None
+            return generated_image, output_filename, prompt, canny_image
+        else:
+            raise FileNotFoundError(f"Output file not found: {output_path}")
+
     except Exception as e:
-        return None, f"Error generating image: {str(e)}", prompt
+        print(f"Error in ControlNet generation: {str(e)}")
+        return None, str(e), prompt, None
+
+    finally:
+        clear_flux_cache()
+        force_mlx_cleanup()
+        print_memory_usage("After generation")
+        print(f"Total generation time: {time.time() - start_time:.2f} seconds")
 
 def process_lora_files(selected_loras):
     if not selected_loras:
@@ -362,7 +407,7 @@ def save_quantized_model_gradio(model, quantize):
         custom_config = CustomModelConfig(model, model, 1000, 512)
     
     model_path = os.path.join(MODELS_DIR, model)
-    
+
     flux = Flux1(
         model_config=custom_config,
         quantize=quantize,
@@ -401,66 +446,59 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
     print(f"Prompt: {prompt}")
     print(f"Image Format: {image_format}")
     print(f"LoRA files: {lora_files}")
-    print_memory_usage("Before generation")
 
-    start_time = time.time()
+    width, height = map(int, image_format.split('(')[1].split(')')[0].split('x'))
+    
+    timestamp = int(time.time())
+    output_filename = f"generated_simple_{timestamp}.png"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
 
     try:
-        width, height = map(int, image_format.split('(')[1].split(')')[0].split('x'))
+        base_model = "schnell"
+        model_path = os.path.join(MODELS_DIR, base_model)
+        if not os.path.exists(model_path):
+            raise ValueError(f"Model path does not exist: {model_path}")
 
-        valid_loras = process_lora_files(lora_files)
-        lora_paths = valid_loras if valid_loras else None
-        lora_scales = [1.0] * len(valid_loras) if valid_loras else None
+        command = [
+            "mflux-generate",
+            "--model", base_model,
+            "--path", model_path,
+            "--prompt", prompt,
+            "--height", str(height),
+            "--width", str(width),
+            "--output", output_path,
+            "--steps", "4"
+        ]
 
-        if "dev" in model:
-            steps = 20
+        if "4-bit" in model:
+            command.extend(["-q", "4"])
+        elif "8-bit" in model:
+            command.extend(["-q", "8"])
+
+        lora_paths = process_lora_files(lora_files)
+        if lora_paths:
+            command.extend(["--lora-paths"] + lora_paths)
+            command.extend(["--lora-scales"] + ["1.0"] * len(lora_paths))
+
+        print(f"Executing command: {' '.join(command)}")
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        print(result.stdout)
+
+        if os.path.exists(output_path):
+            return Image.open(output_path), output_filename, prompt
         else:
-            steps = 4
-
-        flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None)
-
-        timestamp = int(time.time())
-        output_filename = f"generated_simple_{timestamp}.png"
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-
-        image = flux.generate_image(
-            seed=int(time.time()),
-            prompt=prompt,
-            config=Config(
-                num_inference_steps=steps,
-                height=height,
-                width=width,
-                guidance=7.5,
-            ),
-        )
-
-        print_memory_usage("After generating image")
-        
-        image.image.save(output_path)
-
-        print_memory_usage("After saving image")
-        
-        del flux
-        del image
-        
-        gc.collect()
-        
-        force_mlx_cleanup()
-
-        print_memory_usage("After cleanup")
-
-        end_time = time.time()
-        generation_time = end_time - start_time
-        print(f"Generation time: {generation_time:.2f} seconds")
-
-        return output_path, output_filename, prompt
-
+            print(f"Error: Output file not found: {output_path}")
+            return None, None, prompt
+    except subprocess.CalledProcessError as e:
+        print(f"Error running mflux-generate: {e}")
+        print(f"Error output: {e.stderr}")
+        return None, None, prompt
     except Exception as e:
-        print(f"Error in image generation: {str(e)}")
+        print(f"Error generating image: {str(e)}")
         return None, None, prompt
     finally:
+        clear_flux_cache()
         force_mlx_cleanup()
-        gc.collect()
 
 def get_available_ollama_models():
     try:
@@ -496,15 +534,13 @@ def clear_flux_cache():
     gc.collect()
     
     try:
-        mx.metal.reset_peak_memory()
+        if hasattr(mx.metal, 'reset_peak_memory'):
+            mx.metal.reset_peak_memory()
         
         mx.eval(mx.zeros(1))
         
-        if hasattr(mx, 'clear_memory_pool'):
-            mx.clear_memory_pool()
-        
-        if hasattr(mx, 'metal'):
-            mx.metal.device_reset()
+        if hasattr(mx.metal, 'clear_cache'):
+            mx.metal.clear_cache()
         
     except AttributeError as e:
         print(f"Waarschuwing: Sommige MLX geheugenbeheerfuncties zijn niet beschikbaar: {e}")
@@ -630,7 +666,16 @@ def get_updated_lora_files():
     return [file[1] for file in lora_files]
 
 def get_updated_models():
-    return get_available_models()
+    models = []
+    for root, dirs, files in os.walk(MODELS_DIR):
+        if os.path.basename(root) == 'hub':
+            continue
+        for file in files:
+            if file.endswith('.safetensors') or file.endswith('.bin'):
+                model_name = os.path.relpath(root, MODELS_DIR)
+                if model_name not in models:
+                    models.append(model_name)
+    return sorted(models)
 
 def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_length, api_key):
     try:
@@ -846,6 +891,7 @@ def create_ui():
                     with gr.Column():
                         output_image_cn = gr.Image(label="Generated Image")
                         output_message_cn = gr.Textbox(label="Status")
+                        canny_image_cn = gr.Image(label="Canny Edge Detection", visible=False)
                 enhance_ollama_cn.click(
                     fn=enhance_prompt,
                     inputs=[prompt, ollama_components_cn[0], ollama_components_cn[1]],
@@ -857,7 +903,7 @@ def create_ui():
                     inputs=[prompt_cn, control_image, model_cn, seed_cn, height_cn, width_cn, steps_cn, 
                             guidance_cn, controlnet_strength, lora_files_cn, metadata_cn, save_canny,
                             ollama_components_cn[0], ollama_components_cn[1]],
-                    outputs=[output_image_cn, output_message_cn, prompt_cn]
+                    outputs=[output_image_cn, output_message_cn, prompt_cn, canny_image_cn]
                 )
 
                 gr.Markdown("""
@@ -947,10 +993,10 @@ def create_ui():
                         download_output = gr.Textbox(label="Download Status", lines=3)
 
                 def handle_hf_api_key(choice, api_key):
-                    if choice == 0:  # Save API Key
+                    if choice == 0:
                         save_hf_api_key(api_key)
                         return "API Key Status: Saved successfully"
-                    elif choice == 1:  # Clear API Key
+                    elif choice == 1:
                         save_hf_api_key("")
                         return "API Key Status: Cleared"
  
