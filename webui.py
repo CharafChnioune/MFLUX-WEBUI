@@ -2,7 +2,7 @@ import gradio as gr
 import time
 import os
 from pathlib import Path
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, HfApi
 import ollama
 import json
 from functools import partial
@@ -521,7 +521,7 @@ def force_mlx_cleanup():
     
     if hasattr(mx.metal, 'reset_peak_memory'):
         mx.metal.reset_peak_memory()
-    
+
     gc.collect()
 
 def update_guidance_visibility(model):
@@ -682,6 +682,44 @@ def login_huggingface(api_key):
         return "Successfully logged in to Hugging Face"
     except Exception as e:
         return f"Error logging in to Hugging Face: {str(e)}"
+
+def download_lora_model_huggingface(model_name, hf_api_key):
+    if not model_name:
+        return gr.update(), gr.update(), gr.update(), "Error: Model name is missing"
+
+    try:
+        api = HfApi(token=hf_api_key if hf_api_key else None)
+        # Verkrijg de lijst met bestanden
+        files = api.list_repo_files(repo_id=model_name)
+
+        # Filter alleen de .safetensors bestanden
+        safetensors_files = [f for f in files if f.endswith(".safetensors")]
+
+        if not safetensors_files:
+            return gr.update(), gr.update(), gr.update(), f"Error: No .safetensors files found in the model repository '{model_name}'"
+
+        for filename in safetensors_files:
+            # Download het bestand
+            hf_hub_download(
+                repo_id=model_name,
+                filename=filename,
+                local_dir=LORA_DIR,
+                use_auth_token=hf_api_key
+            )
+
+        print(f"Download voltooid: {safetensors_files}")
+        updated_lora_files = get_updated_lora_files()
+        return (
+            gr.update(choices=updated_lora_files),
+            gr.update(choices=updated_lora_files),
+            gr.update(choices=updated_lora_files),
+            f"Download voltooid: {', '.join(safetensors_files)}"
+        )
+
+    except Exception as e:
+        error_message = f"Fout bij het downloaden van LoRA van HuggingFace: {str(e)}"
+        print(f"Error: {error_message}")
+        return gr.update(), gr.update(), gr.update(), error_message
 
 def create_ui():
     with gr.Blocks() as demo:
@@ -871,10 +909,16 @@ def create_ui():
             with gr.TabItem("Models"):
 
                 gr.Markdown("### Download LoRA")
-                lora_url = gr.Textbox(label="LoRA Model Page URL (CivitAI)")
-                
+                lora_source = gr.Radio(
+                    choices=["CivitAI", "HuggingFace"],
+                    label="LoRA Source",
+                    value="CivitAI"
+                )
+                lora_input = gr.Textbox(label="LoRA Model Page URL (CivitAI) or Model Name (HuggingFace)")
+
                 api_key_status = gr.Markdown(value=f"API Key Status: {'Saved' if load_api_key() else 'Not saved'}")
-                
+                hf_api_key_status = gr.Markdown(value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}")
+
                 with gr.Accordion("API Key Settings", open=False):
                     with gr.Row():
                         with gr.Column(scale=3):
@@ -883,35 +927,49 @@ def create_ui():
                                 type="password", 
                                 value=load_api_key()
                             )
+                            hf_api_key_input = gr.Textbox(
+                                label="HuggingFace API Key", 
+                                type="password", 
+                                value=load_hf_api_key()
+                            )
                         with gr.Column(scale=1):
                             api_key_options = gr.Dropdown(
-                                choices=["Save API Key", "Clear API Key"],
+                                choices=["Save API Keys", "Clear API Keys"],
                                 label="API Key Options",
                                 type="index"
                             )
-                    
-                    gr.Markdown("Don't have an API key? [Create one here](https://civitai.com/user/account)")
-                
+                    gr.Markdown("Don't have an API key? [CivitAI](https://civitai.com/user/account), [HuggingFace](https://huggingface.co/settings/tokens)")
+
                 download_lora_button = gr.Button("Download LoRA")
                 lora_download_status = gr.Textbox(label="Download Status", lines=0.5)
 
-                def handle_api_key(choice, api_key):
+                def handle_api_keys(choice, api_key_civitai, api_key_hf):
                     if choice == 0:
-                        save_api_key(api_key)
-                        return "API Key Status: Saved successfully"
+                        save_api_key(api_key_civitai)
+                        save_hf_api_key(api_key_hf)
+                        return "API Key Status: Saved successfully", "API Key Status: Saved successfully"
                     elif choice == 1:
                         save_api_key("")
-                        return "API Key Status: Cleared"
- 
+                        save_hf_api_key("")
+                        return "API Key Status: Cleared", "API Key Status: Cleared"
+
                 api_key_options.change(
-                    fn=handle_api_key,
-                    inputs=[api_key_options, api_key_input],
-                    outputs=[api_key_status]
+                    fn=handle_api_keys,
+                    inputs=[api_key_options, api_key_input, hf_api_key_input],
+                    outputs=[api_key_status, hf_api_key_status]
                 )
- 
+
+                def download_lora(model_url_or_name, api_key_civitai, api_key_hf, lora_source):
+                    if lora_source == "CivitAI":
+                        return download_lora_model(model_url_or_name, api_key_civitai)
+                    elif lora_source == "HuggingFace":
+                        return download_lora_model_huggingface(model_url_or_name, api_key_hf)
+                    else:
+                        return gr.update(), gr.update(), gr.update(), "Error: Invalid LoRA source selected"
+
                 download_lora_button.click(
-                    fn=download_lora_model,
-                    inputs=[lora_url, api_key_input],
+                    fn=download_lora,
+                    inputs=[lora_input, api_key_input, hf_api_key_input, lora_source],
                     outputs=[lora_files_simple, lora_files, lora_files_cn, lora_download_status]
                 )
 
