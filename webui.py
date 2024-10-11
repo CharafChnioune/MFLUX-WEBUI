@@ -13,7 +13,6 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import subprocess
-from mflux.config.model_config import ModelConfig
 from mflux.config.config import Config, ConfigControlnet
 from mflux.flux.flux import Flux1
 from mflux.controlnet.flux_controlnet import Flux1Controlnet
@@ -84,16 +83,9 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     except Exception as e:
         return f"Error: {str(e)}"
 
-@lru_cache(maxsize=None)
 def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet=False):
-    global flux_cache
-    
     lora_paths = list(lora_paths_tuple) if lora_paths_tuple else None
     lora_scales = list(lora_scales_tuple) if lora_scales_tuple else None
-    
-    key = (model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet)
-    if key in flux_cache:
-        return flux_cache[key]
     
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
@@ -122,7 +114,6 @@ def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tupl
         lora_scales=lora_scales,
     )
     
-    flux_cache[key] = flux
     return flux
 
 def get_available_lora_files():
@@ -244,9 +235,11 @@ def generate_image_gradio(
 
     print_memory_usage("After saving image")
 
-    clear_flux_cache()
-
-    print_memory_usage("After clearing cache")
+    # Opruimen
+    del flux
+    del image
+    gc.collect()
+    force_mlx_cleanup()
 
     end_time = time.time()
     generation_time = end_time - start_time
@@ -328,9 +321,16 @@ def generate_image_controlnet_gradio(
         
         os.remove(control_image_path)
         
-        clear_flux_cache()
-        
-        print_memory_usage("After clearing cache")
+        # Verwijder de flux-instantie en de afbeelding
+        del flux
+        del generated_image
+
+        # Roep de garbage collector aan
+        import gc
+        gc.collect()
+
+        # Roep de geheugenopruimingsfunctie aan
+        force_mlx_cleanup()
 
         end_time = time.time()
         generation_time = end_time - start_time
