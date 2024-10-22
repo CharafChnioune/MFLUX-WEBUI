@@ -120,7 +120,7 @@ def get_available_lora_files():
     return [(str(f), f.stem) for f in Path(LORA_DIR).rglob("*.safetensors")]
 
 def get_available_models():
-    standard_models = ["dev", "schnell", "dev-8-bit", "dev-4-bit", "schnell-8-bit", "schnell-4-bit"]
+    standard_models = ["schnell-4-bit", "schnell-8-bit", "dev-4-bit", "dev-8-bit", "schnell", "dev"]
     custom_models = [f.name for f in Path(MODELS_DIR).iterdir() if f.is_dir()]
     return standard_models + custom_models
 
@@ -743,7 +743,7 @@ def create_ui():
                         model_simple = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
-                            value="schnell"
+                            value="schnell-4-bit"
                         )
                         image_format = gr.Dropdown(
                             choices=[
