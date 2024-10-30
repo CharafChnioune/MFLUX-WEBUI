@@ -1,3 +1,4 @@
+import tempfile
 import gradio as gr
 import time
 import os
@@ -18,10 +19,12 @@ from mflux.flux.flux import Flux1
 from mflux.controlnet.flux_controlnet import Flux1Controlnet
 from tqdm import tqdm
 from huggingface_hub import HfApi, HfFolder
+from PIL import Image
+from mflux.ui.cli.parsers import CommandLineParser
 
 LORA_DIR = os.path.join(os.path.dirname(__file__), "lora")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)       
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -83,9 +86,9 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     except Exception as e:
         return f"Error: {str(e)}"
 
-def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet=False):
-    lora_paths = list(lora_paths_tuple) if lora_paths_tuple else None
-    lora_scales = list(lora_scales_tuple) if lora_scales_tuple else None
+def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
+    lora_paths = lora_paths if lora_paths else None
+    lora_scales = lora_scales if lora_scales else None
     
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
@@ -117,7 +120,7 @@ def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tupl
     return flux
 
 def get_available_lora_files():
-    return [(str(f), f.stem) for f in Path(LORA_DIR).rglob("*.safetensors")]
+    return [(f.stem, str(f)) for f in Path(LORA_DIR).rglob("*.safetensors")]
 
 def get_available_models():
     standard_models = ["schnell-4-bit", "schnell-8-bit", "dev-4-bit", "dev-8-bit", "schnell", "dev"]
@@ -207,7 +210,7 @@ def generate_image_gradio(
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None)
+    flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
 
     print_memory_usage("After creating flux")
 
@@ -229,13 +232,12 @@ def generate_image_gradio(
         ),
     )
 
-    print_memory_usage("After generating image")
-
     image.image.save(output_path)
+
+    print_memory_usage("After generating image")
 
     print_memory_usage("After saving image")
 
-    # Opruimen
     del flux
     del image
     gc.collect()
@@ -280,12 +282,12 @@ def generate_image_controlnet_gradio(
     lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
     if "dev" not in model:
-        guidance = None
+        guidance = 0
 
     seed = None if seed == "" else int(seed)
     steps = None if steps == "" else int(steps)
 
-    flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None, is_controlnet=True)
+    flux = get_or_create_flux(model, None, None, lora_paths, lora_scales, is_controlnet=True)
 
     print_memory_usage("After creating flux")
 
@@ -302,6 +304,11 @@ def generate_image_controlnet_gradio(
 
         control_image_path = os.path.join(OUTPUT_DIR, f"control_image_{timestamp}.png")
         control_image.save(control_image_path)
+
+        if save_canny:
+            canny_image_filename = f"canny_image_{timestamp}.png"
+            canny_image_path = os.path.join(OUTPUT_DIR, canny_image_filename)
+            control_image.save(canny_image_path)
 
         generated_image = flux.generate_image(
             seed=int(time.time()) if seed is None else seed,
@@ -321,22 +328,17 @@ def generate_image_controlnet_gradio(
         
         os.remove(control_image_path)
         
-        # Verwijder de flux-instantie en de afbeelding
+        output_image = generated_image.image
+
         del flux
-        del generated_image
-
-        # Roep de garbage collector aan
-        import gc
         gc.collect()
-
-        # Roep de geheugenopruimingsfunctie aan
         force_mlx_cleanup()
 
         end_time = time.time()
         generation_time = end_time - start_time
         print(f"Generation time: {generation_time:.2f} seconds")
 
-        return generated_image.image, f"Image generated successfully! Saved as {output_filename}", prompt
+        return output_image, f"Image generated successfully! Saved as {output_filename}", prompt
     except Exception as e:
         return None, f"Error generating image: {str(e)}", prompt
 
@@ -349,9 +351,8 @@ def process_lora_files(selected_loras):
     lora_dict = dict(lora_files)
     valid_loras = []
     for lora in selected_loras:
-        matching_loras = [path for path, name in lora_dict.items() if name == lora]
-        if matching_loras:
-            valid_loras.extend(matching_loras)
+        if lora in lora_dict:
+            valid_loras.append(lora_dict[lora])
     return valid_loras
 
 def save_quantized_model_gradio(model, quantize):
@@ -381,20 +382,6 @@ def save_quantized_model_gradio(model, quantize):
         f"Model gekwantiseerd en opgeslagen als {save_path}"
     )
 
-def process_lora_files(selected_loras):
-    if not selected_loras:
-        return []
-    lora_files = get_available_lora_files()
-    if not lora_files:
-        return []
-    lora_dict = dict(lora_files)
-    valid_loras = []
-    for lora in selected_loras:
-        matching_loras = [path for path, name in lora_dict.items() if name == lora]
-        if matching_loras:
-            valid_loras.extend(matching_loras)
-    return valid_loras
-
 def simple_generate_image(prompt, model, image_format, lora_files, ollama_model, system_prompt):
     print(f"\n--- Generating image ---")
     print(f"Model: {model}")
@@ -417,7 +404,7 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
         else:
             steps = 4
 
-        flux = get_or_create_flux(model, None, None, tuple(lora_paths) if lora_paths else None, tuple(lora_scales) if lora_scales else None)
+        flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
 
         timestamp = int(time.time())
         output_filename = f"generated_simple_{timestamp}.png"
@@ -626,8 +613,12 @@ def download_lora_model(page_url, api_key):
         return gr.update(), gr.update(), gr.update(), error_message
 
 def get_updated_lora_files():
-    lora_files = get_available_lora_files()
-    return [file[1] for file in lora_files]
+    lora_files = []
+    for root, dirs, files in os.walk(LORA_DIR):
+        for file in files:
+            if file.endswith(".safetensors") or file.endswith(".ckpt"):
+                lora_files.append(file)
+    return lora_files
 
 def get_updated_models():
     return get_available_models()
@@ -689,17 +680,16 @@ def download_lora_model_huggingface(model_name, hf_api_key):
 
     try:
         api = HfApi(token=hf_api_key if hf_api_key else None)
-        # Verkrijg de lijst met bestanden
+        
         files = api.list_repo_files(repo_id=model_name)
 
-        # Filter alleen de .safetensors bestanden
         safetensors_files = [f for f in files if f.endswith(".safetensors")]
 
         if not safetensors_files:
             return gr.update(), gr.update(), gr.update(), f"Error: No .safetensors files found in the model repository '{model_name}'"
 
         for filename in safetensors_files:
-            # Download het bestand
+
             hf_hub_download(
                 repo_id=model_name,
                 filename=filename,
@@ -720,6 +710,85 @@ def download_lora_model_huggingface(model_name, hf_api_key):
         error_message = f"Fout bij het downloaden van LoRA van HuggingFace: {str(e)}"
         print(f"Error: {error_message}")
         return gr.update(), gr.update(), gr.update(), error_message
+
+def generate_image_i2i_gradio(
+    prompt,
+    init_image,
+    init_image_strength,
+    model,
+    seed,
+    height,
+    width,
+    steps,
+    guidance,
+    lora_files,
+    lora_scale,
+    metadata,
+    ollama_model,
+    system_prompt
+):
+    print(f"\n--- Generating image (Image-to-Image) ---")
+    print(f"Model: {model}")
+    print(f"Prompt: {prompt}")
+    print(f"Init Image Strength: {init_image_strength}")
+    print(f"Dimensions: {height}x{width}")
+    print(f"Steps: {steps}")
+    print(f"Guidance: {guidance}")
+    print(f"LoRA files: {lora_files}")
+    print(f"LoRA Scale: {lora_scale}")
+    print_memory_usage("Before generation")
+    start_time = time.time()
+
+    valid_loras = process_lora_files(lora_files)
+    lora_paths = valid_loras if valid_loras else None
+    lora_scales = [lora_scale] * len(valid_loras) if valid_loras else None
+
+    seed = None if seed == "" else int(seed)
+    steps = None if steps == "" else int(steps)
+
+    flux = get_or_create_flux(
+        model,
+        None,
+        None,
+        lora_paths,
+        lora_scales
+    )
+
+    print_memory_usage("After creating flux")
+    timestamp = int(time.time())
+    output_filename = f"generated_i2i_{timestamp}.png"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
+        init_image.save(temp.name)
+        init_image_path = temp.name
+
+    config = Config(
+        num_inference_steps=steps,
+        guidance=guidance,
+        height=height,
+        width=width,
+        init_image_path=init_image_path,
+        init_image_strength=init_image_strength
+    )
+
+    image = flux.generate_image(
+        seed=seed,
+        prompt=prompt,
+        config=config
+    )
+
+    image.image.save(output_path)
+    
+    os.remove(init_image_path)
+
+    duration = time.time() - start_time
+    print(f"Image generated in {duration:.2f} seconds. Saved as {output_filename}")
+    print_memory_usage("After saving image")
+
+    return image.image, output_filename, prompt
+
+demo = None
 
 def create_ui():
     with gr.Blocks() as demo:
@@ -760,7 +829,7 @@ def create_ui():
                             value="Portrait (576x1024)"
                         )
                         lora_files_simple = gr.Dropdown(
-                            choices=get_updated_lora_files(),
+                            choices=[name for name, _ in get_available_lora_files()],
                             label="Select LoRA Files",
                             multiselect=True,
                             allow_custom_value=True,
@@ -812,7 +881,7 @@ def create_ui():
                         steps = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance = gr.Number(label="Guidance Scale", value=3.5, visible=False)
                         lora_files = gr.Dropdown(
-                            choices=get_updated_lora_files(),
+                            choices=[name for name, _ in get_available_lora_files()],
                             label="Select LoRA Files",
                             multiselect=True,
                             allow_custom_value=True,
@@ -870,9 +939,9 @@ def create_ui():
                             height_cn = gr.Number(label="Height", value=1024, precision=0)
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance_cn = gr.Number(label="Guidance Scale", value=3.5, visible=False)
-                        controlnet_strength = gr.Number(label="ControlNet Strength", value=0.7)
+                        controlnet_strength = gr.Number(label="ControlNet Strength", value=0.5)
                         lora_files_cn = gr.Dropdown(
-                            choices=get_updated_lora_files(),
+                            choices=[name for name, _ in get_available_lora_files()],
                             label="Select LoRA Files",
                             multiselect=True,
                             allow_custom_value=True,
@@ -899,15 +968,87 @@ def create_ui():
                 )
 
                 gr.Markdown("""
-                ⚠️ Note: Controlnet requires [InstantX/FLUX.1-dev-Controlnet-Canny](https://huggingface.co/InstantX/FLUX.1-dev-Controlnet-Canny), which was trained for the `dev` model. 
+                ⚠ Note: Controlnet requires [InstantX/FLUX.1-dev-Controlnet-Canny](https://huggingface.co/InstantX/FLUX.1-dev-Controlnet-Canny), which was trained for the `dev` model. 
                 It can work well with `schnell`, but performance is not guaranteed.
 
-                ⚠️ Note: The output can be highly sensitive to the controlnet strength and is very much dependent on the reference image. 
+                ⚠ Note: The output can be highly sensitive to the controlnet strength and is very much dependent on the reference image. 
                 Too high settings will corrupt the image. A recommended starting point is a value like 0.4. Experiment with different strengths to find the best result.
                 """)
 
-            with gr.TabItem("Models"):
-
+            with gr.TabItem("Image-to-Image", id=3):
+                with gr.Row():
+                    with gr.Column():
+                        with gr.Group():
+                            prompt_i2i = gr.Textbox(label="Prompt", lines=2)
+                            with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_i2i:
+                                ollama_components_i2i = create_ollama_settings()
+                            with gr.Row():
+                                enhance_ollama_i2i = gr.Button("Enhance prompt with Ollama")
+                            
+                            ollama_components_i2i[2].click(
+                                fn=save_settings,
+                                inputs=[ollama_components_i2i[0], ollama_components_i2i[1]],
+                                outputs=[ollama_section_i2i]
+                            )
+                            
+                            init_image = gr.Image(label="Initial Image", type="pil")
+                            init_image_strength = gr.Number(
+                                label="Init Image Strength (0.0 - 1.0)", 
+                                value=0.3
+                            )
+                            
+                            model_i2i = gr.Dropdown(
+                                choices=get_updated_models(),
+                                label="Model",
+                                value="schnell-4-bit"
+                            )
+                            seed_i2i = gr.Textbox(label="Seed (optional)", value="43")
+                            with gr.Row():
+                                width_i2i = gr.Number(label="Width", value=1024, precision=0)
+                                height_i2i = gr.Number(label="Height", value=1024, precision=0)
+                            steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="20")
+                            guidance_i2i = gr.Number(label="Guidance Scale", value=4.0)
+                            lora_files_i2i = gr.Dropdown(
+                                choices=[name for name, _ in get_available_lora_files()],
+                                label="Select LoRA Files",
+                                multiselect=True,
+                                allow_custom_value=True,
+                                value=[]
+                            )
+                            lora_scale_i2i = gr.Number(label="LoRA Scale", value=1.0)
+                            metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
+                            generate_button_i2i = gr.Button("Generate Image")
+                        with gr.Column():
+                            output_image_i2i = gr.Image(label="Generated Image")
+                            output_filename_i2i = gr.Textbox(label="Saved Image Filename")
+                    
+                    enhance_ollama_i2i.click(
+                        fn=enhance_prompt,
+                        inputs=[prompt_i2i, ollama_components_i2i[0], ollama_components_i2i[1]],
+                        outputs=prompt_i2i
+                    )
+                    
+                    generate_button_i2i.click(
+                        fn=generate_image_i2i_gradio,
+                        inputs=[
+                            prompt_i2i,
+                            init_image,
+                            init_image_strength,
+                            model_i2i,
+                            seed_i2i,
+                            height_i2i,
+                            width_i2i,
+                            steps_i2i,
+                            guidance_i2i,
+                            lora_files_i2i,
+                            lora_scale_i2i,
+                            metadata_i2i,
+                            ollama_components_i2i[0],
+                            ollama_components_i2i[1],
+                        ],
+                        outputs=[output_image_i2i, output_filename_i2i, prompt_i2i]
+                    )
+            with gr.TabItem("Model & LoRA Management"):
                 gr.Markdown("### Download LoRA")
                 lora_source = gr.Radio(
                     choices=["CivitAI", "HuggingFace"],
@@ -916,7 +1057,7 @@ def create_ui():
                 )
                 lora_input = gr.Textbox(label="LoRA Model Page URL (CivitAI) or Model Name (HuggingFace)")
 
-                api_key_status = gr.Markdown(value=f"API Key Status: {'Saved' if load_api_key() else 'Not saved'}")
+                civitai_api_key_status = gr.Markdown(value=f"CivitAI API Key Status: {'Saved' if load_api_key() else 'Not saved'}")
                 hf_api_key_status = gr.Markdown(value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}")
 
                 with gr.Accordion("API Key Settings", open=False):
@@ -927,36 +1068,50 @@ def create_ui():
                                 type="password", 
                                 value=load_api_key()
                             )
+                            civitai_api_key_status = gr.Markdown(
+                                value=f"CivitAI API Key Status: {'Saved' if load_api_key() else 'Not saved'}"
+                            )
+                            
                             hf_api_key_input = gr.Textbox(
                                 label="HuggingFace API Key", 
                                 type="password", 
                                 value=load_hf_api_key()
                             )
-                        with gr.Column(scale=1):
-                            api_key_options = gr.Dropdown(
-                                choices=["Save API Keys", "Clear API Keys"],
-                                label="API Key Options",
-                                type="index"
+                            hf_api_key_status = gr.Markdown(
+                                value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}"
                             )
+                        with gr.Column(scale=1):
+                            save_api_keys_button = gr.Button("Save API Keys")
+                            clear_api_keys_button = gr.Button("Clear API Keys")
                     gr.Markdown("Don't have an API key? [CivitAI](https://civitai.com/user/account), [HuggingFace](https://huggingface.co/settings/tokens)")
 
                 download_lora_button = gr.Button("Download LoRA")
                 lora_download_status = gr.Textbox(label="Download Status", lines=0.5)
 
-                def handle_api_keys(choice, api_key_civitai, api_key_hf):
-                    if choice == 0:
-                        save_api_key(api_key_civitai)
-                        save_hf_api_key(api_key_hf)
-                        return "API Key Status: Saved successfully", "API Key Status: Saved successfully"
-                    elif choice == 1:
-                        save_api_key("")
-                        save_hf_api_key("")
-                        return "API Key Status: Cleared", "API Key Status: Cleared"
+                def save_api_keys(api_key_civitai, api_key_hf):
+                    save_api_key(api_key_civitai)
+                    save_hf_api_key(api_key_hf)
+                    civitai_status = f"CivitAI API Key Status: {'Saved successfully' if api_key_civitai else 'Not saved'}"
+                    hf_status = f"HuggingFace API Key Status: {'Saved successfully' if api_key_hf else 'Not saved'}"
+                    return civitai_status, hf_status
 
-                api_key_options.change(
-                    fn=handle_api_keys,
-                    inputs=[api_key_options, api_key_input, hf_api_key_input],
-                    outputs=[api_key_status, hf_api_key_status]
+                def clear_api_keys():
+                    save_api_key("")
+                    save_hf_api_key("")
+                    civitai_status = "CivitAI API Key Status: Cleared"
+                    hf_status = "HuggingFace API Key Status: Cleared"
+                    return civitai_status, hf_status
+
+                save_api_keys_button.click(
+                    fn=save_api_keys,
+                    inputs=[api_key_input, hf_api_key_input],
+                    outputs=[civitai_api_key_status, hf_api_key_status]
+                )
+
+                clear_api_keys_button.click(
+                    fn=clear_api_keys,
+                    inputs=[],
+                    outputs=[civitai_api_key_status, hf_api_key_status]
                 )
 
                 def download_lora(model_url_or_name, api_key_civitai, api_key_hf, lora_source):
@@ -981,41 +1136,50 @@ def create_ui():
                         num_train_steps = gr.Number(label="Number of Training Steps", value=1000)
                         max_sequence_length = gr.Number(label="Max Sequence Length", value=512)
                         
-                        hf_api_key_status = gr.Markdown(value=f"API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}")
-                        
                         with gr.Accordion("API Key Settings", open=False):
                             with gr.Row():
                                 with gr.Column(scale=3):
                                     hf_api_key_input = gr.Textbox(
-                                        label="Hugging Face API Key", 
+                                        label="HuggingFace API Key", 
                                         type="password", 
                                         value=load_hf_api_key()
                                     )
-                                with gr.Column(scale=1):
-                                    hf_api_key_options = gr.Dropdown(
-                                        choices=["Save API Key", "Clear API Key"],
-                                        label="API Key Options",
-                                        type="index"
+                                    hf_api_key_status = gr.Markdown(
+                                        value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}"
                                     )
-                            
+                                with gr.Column(scale=1):
+                                    save_hf_api_key_button = gr.Button("Save API Key")
+                                    clear_hf_api_key_button = gr.Button("Clear API Key")
                             gr.Markdown("Don't have an API key? [Create one here](https://huggingface.co/settings/tokens)")
                         
                     with gr.Column(scale=1):
                         download_button = gr.Button("Download and Add Model")
                         download_output = gr.Textbox(label="Download Status", lines=3)
 
-                def handle_hf_api_key(choice, api_key):
-                    if choice == 0:  # Save API Key
-                        save_hf_api_key(api_key)
-                        return "API Key Status: Saved successfully"
-                    elif choice == 1:  # Clear API Key
-                        save_hf_api_key("")
-                        return "API Key Status: Cleared"
- 
-                hf_api_key_options.change(
-                    fn=handle_hf_api_key,
-                    inputs=[hf_api_key_options, hf_api_key_input],
+                def save_hf_api_key_handler(key):
+                    save_hf_api_key(key)
+                    return f"HuggingFace API Key Status: {'Saved successfully' if key else 'Not saved'}"
+
+                def clear_hf_api_key_handler():
+                    save_hf_api_key("")
+                    return "HuggingFace API Key Status: Cleared"
+
+                save_hf_api_key_button.click(
+                    fn=save_hf_api_key_handler,
+                    inputs=[hf_api_key_input],
                     outputs=[hf_api_key_status]
+                )
+
+                clear_hf_api_key_button.click(
+                    fn=clear_hf_api_key_handler,
+                    inputs=[],
+                    outputs=[hf_api_key_status]
+                )
+
+                download_button.click(
+                    fn=download_and_save_model,
+                    inputs=[hf_model_name, alias, num_train_steps, max_sequence_length, hf_api_key_input],
+                    outputs=[download_output]
                 )
 
                 gr.Markdown("## Quantize Model")
@@ -1031,30 +1195,15 @@ def create_ui():
                         save_button = gr.Button("Save Quantized Model")
                         save_output = gr.Textbox(label="Quantization Output", lines=3)
 
-                download_button.click(
-                    fn=download_and_save_model,
-                    inputs=[hf_model_name, alias, num_train_steps, max_sequence_length, hf_api_key_input],
-                    outputs=[model_simple, model, model_cn, model_quant, download_output]
-                )
-
                 save_button.click(
                     fn=save_quantized_model_gradio,
                     inputs=[model_quant, quantize_level],
                     outputs=[model_simple, model, model_cn, model_quant, save_output]
                 )
 
-                save_hf_api_key_button = gr.Button("Save Hugging Face API Key")
-                save_hf_api_key_button.click(
-                    fn=lambda key: save_hf_api_key(key) or "API Key saved successfully",
-                    inputs=[hf_api_key_input],
-                    outputs=[gr.Textbox(label="API Key Status")]
-                )
-
     return demo
 
-def main():
-    demo = create_ui()
-    demo.launch()
+demo = create_ui()
 
 if __name__ == "__main__":
-    main()
+    demo.queue().launch(show_error=True)
