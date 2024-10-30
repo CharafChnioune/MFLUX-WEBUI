@@ -192,10 +192,14 @@ def print_memory_usage(label):
 def generate_image_gradio(
     prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt
 ):
+
+    width = width - (width % 16)
+    height = height - (height % 16)
+
     print(f"\n--- Generating image (Advanced) ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
-    print(f"Dimensions: {height}x{width}")
+    print(f"Adjusted Dimensions: {height}x{width}")
     print(f"Steps: {steps}")
     print(f"Guidance: {guidance}")
     print(f"LoRA files: {lora_files}")
@@ -208,14 +212,21 @@ def generate_image_gradio(
     lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
     seed = None if seed == "" else int(seed)
-    steps = None if steps == "" else int(steps)
+
+    if not steps or steps.strip() == "":
+        base_model = model.replace("-4-bit", "").replace("-8-bit", "")
+        if "schnell" in base_model:
+            steps = 4
+        elif "dev" in base_model:
+            steps = 20
+        else:
+            steps = 20
+    else:
+        steps = int(steps)
 
     flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
 
     print_memory_usage("After creating flux")
-
-    if steps is None:
-        steps = 4 if model == "schnell" else 14
 
     timestamp = int(time.time())
     output_filename = f"generated_{timestamp}.png"
@@ -727,12 +738,42 @@ def generate_image_i2i_gradio(
     ollama_model,
     system_prompt
 ):
+    width, height = init_image.size
+
+    # Bepaal standaard steps op basis van het model
+    if not steps or steps.strip() == "":
+        base_model = model.replace("-4-bit", "").replace("-8-bit", "")
+        steps = 4 if "schnell" in base_model else 20
+    else:
+        steps = int(steps)
+
+    # Pas num_inference_steps aan om te compenseren voor init_image_strength
+    if init_image_strength is not None and init_image_strength < 1.0:
+        num_inference_steps = int(steps / (1 - init_image_strength))
+    else:
+        num_inference_steps = steps
+
+    # Zorg dat num_inference_steps minimaal 1 is
+    num_inference_steps = max(1, num_inference_steps)
+
+    # Zorg dat seed een integer is
+    if not seed or seed.strip() == "":
+        seed = int(time.time()) % 4294967295  # Gebruik huidige tijd als seed
+    else:
+        seed = int(seed)
+
+    # Pas de afmetingen aan naar veelvouden van 16
+    width = width - (width % 16)
+    height = height - (height % 16)
+    init_image = init_image.resize((width, height))
+
     print(f"\n--- Generating image (Image-to-Image) ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
     print(f"Init Image Strength: {init_image_strength}")
-    print(f"Dimensions: {height}x{width}")
-    print(f"Steps: {steps}")
+    print(f"Adjusted Dimensions: {width}x{height}")
+    print(f"Desired Steps: {steps}")
+    print(f"Adjusted num_inference_steps: {num_inference_steps}")
     print(f"Guidance: {guidance}")
     print(f"LoRA files: {lora_files}")
     print(f"LoRA Scale: {lora_scale}")
@@ -743,9 +784,6 @@ def generate_image_i2i_gradio(
     lora_paths = valid_loras if valid_loras else None
     lora_scales = [lora_scale] * len(valid_loras) if valid_loras else None
 
-    seed = None if seed == "" else int(seed)
-    steps = None if steps == "" else int(steps)
-
     flux = get_or_create_flux(
         model,
         None,
@@ -753,8 +791,8 @@ def generate_image_i2i_gradio(
         lora_paths,
         lora_scales
     )
-
     print_memory_usage("After creating flux")
+
     timestamp = int(time.time())
     output_filename = f"generated_i2i_{timestamp}.png"
     output_path = os.path.join(OUTPUT_DIR, output_filename)
@@ -764,7 +802,7 @@ def generate_image_i2i_gradio(
         init_image_path = temp.name
 
     config = Config(
-        num_inference_steps=steps,
+        num_inference_steps=num_inference_steps,
         guidance=guidance,
         height=height,
         width=width,
@@ -779,9 +817,7 @@ def generate_image_i2i_gradio(
     )
 
     image.image.save(output_path)
-    
     os.remove(init_image_path)
-
     duration = time.time() - start_time
     print(f"Image generated in {duration:.2f} seconds. Saved as {output_filename}")
     print_memory_usage("After saving image")
@@ -1002,11 +1038,10 @@ def create_ui():
                                 label="Model",
                                 value="schnell-4-bit"
                             )
-                            seed_i2i = gr.Textbox(label="Seed (optional)", value="43")
-                            with gr.Row():
-                                width_i2i = gr.Number(label="Width", value=1024, precision=0)
-                                height_i2i = gr.Number(label="Height", value=1024, precision=0)
-                            steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="20")
+                            seed_i2i = gr.Textbox(label="Seed (optional)", value="")
+                            width_i2i = gr.Number(label="Width", value=1024, precision=0, visible=False)
+                            height_i2i = gr.Number(label="Height", value=1024, precision=0, visible=False)
+                            steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="")
                             guidance_i2i = gr.Number(label="Guidance Scale", value=4.0)
                             lora_files_i2i = gr.Dropdown(
                                 choices=[name for name, _ in get_available_lora_files()],
