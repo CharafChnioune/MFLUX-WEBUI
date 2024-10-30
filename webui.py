@@ -740,29 +740,24 @@ def generate_image_i2i_gradio(
 ):
     width, height = init_image.size
 
-    # Bepaal standaard steps op basis van het model
     if not steps or steps.strip() == "":
         base_model = model.replace("-4-bit", "").replace("-8-bit", "")
         steps = 4 if "schnell" in base_model else 20
     else:
         steps = int(steps)
 
-    # Pas num_inference_steps aan om te compenseren voor init_image_strength
     if init_image_strength is not None and init_image_strength < 1.0:
         num_inference_steps = int(steps / (1 - init_image_strength))
     else:
         num_inference_steps = steps
 
-    # Zorg dat num_inference_steps minimaal 1 is
     num_inference_steps = max(1, num_inference_steps)
 
-    # Zorg dat seed een integer is
     if not seed or seed.strip() == "":
-        seed = int(time.time()) % 4294967295  # Gebruik huidige tijd als seed
+        seed = int(time.time()) % 4294967295 
     else:
         seed = int(seed)
 
-    # Pas de afmetingen aan naar veelvouden van 16
     width = width - (width % 16)
     height = height - (height % 16)
     init_image = init_image.resize((width, height))
