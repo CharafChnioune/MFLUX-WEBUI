@@ -10,11 +10,12 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio.
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the MFLUX image generation system. It provides an intuitive way to interact with MFLUX models, offering both simple and advanced options for image generation, as well as support for ControlNet and LoRA integration.
+MFLUX WebUI is a comprehensive interface for the MFLUX image generation system. It provides an intuitive way to interact with MFLUX models, offering both simple and advanced options for image generation, as well as support for ControlNet, LoRA integration, and image-to-image transformation.
 
 ## Features
 
 - 🖼️ Simple and advanced image generation interfaces
+- 🎨 **Image-to-Image Transformation** for enhancing and modifying existing images
 - 🎛️ ControlNet support for guided image generation
 - 🧠 LoRA (Low-Rank Adaptation) integration for fine-tuned models
 - ⚙️ Model quantization options for optimized performance
@@ -64,12 +65,13 @@ Access the interface in your web browser at `http://localhost:7860`.
 
 ### Interface Overview
 
-The MFLUX WebUI consists of four main tabs:
+The MFLUX WebUI consists of five main tabs:
 
 1. **MFLUX Easy**: A simplified interface for quick image generation.
 2. **Advanced Generate**: Provides full control over image generation parameters.
 3. **ControlNet**: Enables guided image generation using a control image.
-4. **Models**: Allows for model management, including downloading, adding, and quantizing models.
+4. **Image-to-Image**: Transform existing images with new prompts.
+5. **Models**: Allows for model management, including downloading, adding, and quantizing models.
 
 ## Detailed Feature Guide
 
@@ -80,7 +82,7 @@ The MFLUX Easy tab provides a simplified interface for quick image generation:
 - **Prompt**: Enter your text prompt describing the image you want to generate.
 - **Enhance prompt with Ollama**: Option to improve the prompt using Ollama.
 - **Model**: Choose between "schnell" (fast, lower quality) and "dev" (slow, higher quality).
-- **Height/Width**: Set the dimensions of the generated image.
+- **Image Format**: Select common image dimensions.
 - **LoRA Files**: Select LoRA files to use in generation (if available).
 
 ### Advanced Generate
@@ -89,6 +91,7 @@ The Advanced Generate tab offers more control over the image generation process:
 
 - All features from MFLUX Easy, plus:
 - **Seed**: Set a specific seed for reproducible results.
+- **Width/Height**: Set custom dimensions for the generated image.
 - **Inference Steps**: Control the number of denoising steps.
 - **Guidance Scale**: Adjust how closely the image follows the text prompt.
 - **Export Metadata**: Option to export generation parameters as JSON.
@@ -100,21 +103,37 @@ The ControlNet tab allows for guided image generation:
 - All features from Advanced Generate, plus:
 - **Control Image**: Upload an image to guide the generation process.
 - **ControlNet Strength**: Adjust the influence of the control image.
-- **Save Canny Edge Detection**: Option to save the edge detection result.
+- **Save Canny Edge Detection Image**: Option to save the edge detection result.
 
-Note: ControlNet requires a one-time download of ~3.58GB of weights from Huggingface.
+Note: ControlNet requires [InstantX/FLUX.1-dev-Controlnet-Canny](https://huggingface.co/InstantX/FLUX.1-dev-Controlnet-Canny), which was trained for the `dev` model. It can work well with `schnell`, but performance is not guaranteed.
+
+### Image-to-Image
+
+The Image-to-Image tab allows you to transform existing images using new prompts:
+
+- **Prompt**: Enter your text prompt describing how you want to transform the image.
+- **Enhance prompt with Ollama**: Option to improve the prompt using Ollama.
+- **Initial Image**: Upload the image you want to transform.
+- **Init Image Strength**: Control how much the initial image influences the final result (0.0 - 1.0).
+- **Model**: Choose the model to use for image transformation.
+- **Seed**: Set a specific seed for reproducible results.
+- **Width/Height**: Set dimensions for the generated image.
+- **Inference Steps**: Control the number of denoising steps.
+- **Guidance Scale**: Adjust how closely the image follows the text prompt.
+- **LoRA Files**: Select LoRA files to use in transformation (if available).
+- **LoRA Scale**: Adjust the influence of the LoRA files.
+- **Export Metadata**: Option to export generation parameters as JSON.
 
 ### Models
 
 The Models tab enables you to manage models:
 
+- **Download LoRA**: Download LoRA models directly from within the interface.
 - **Download and Add Model**: Download models from Hugging Face and add them to available models.
 - **Quantize Model**: Create optimized versions of the models:
   - Choose which model to quantize ("dev" or "schnell").
   - Select the quantization level (4-bit or 8-bit).
-  - Specify where to save the quantized model.
   - View the quantization output in a dedicated textbox.
-- **Download LoRA**: Download LoRA models directly from within the interface.
 
 ## LoRA Integration
 
@@ -126,10 +145,10 @@ LoRA (Low-Rank Adaptation) allows for fine-tuned models to be used in image gene
 
 ## Ollama Integration
 
-MFLUX WebUI now integrates Ollama for prompt enhancement:
+MFLUX WebUI integrates Ollama for prompt enhancement:
 
 - Enable the "Enhance prompt with Ollama" option to automatically improve your prompts.
-- The default Ollama model is set to 'qwen2.5:3b', but this can be adjusted in the code.
+- Adjust Ollama settings, including the model and system prompt, in the Ollama Settings section.
 
 ## Contributing
 

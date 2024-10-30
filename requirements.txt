@@ -1,5 +1,5 @@
-mflux==0.3.0
-gradio==4.44.0
+mflux==0.4.1
+gradio==5.4.0
 ollama==0.3.3
 requests==2.32.3
-beautifulsoup4==4.12.3
+beautifulsoup4==4.12
