@@ -21,6 +21,8 @@ from tqdm import tqdm
 from huggingface_hub import HfApi, HfFolder
 from PIL import Image
 from mflux.ui.cli.parsers import CommandLineParser
+import base64
+from io import BytesIO
 
 LORA_DIR = os.path.join(os.path.dirname(__file__), "lora")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
@@ -512,7 +514,7 @@ def clear_flux_cache():
         if hasattr(mx, 'clear_memory_pool'):
             mx.clear_memory_pool()
         
-        if hasattr(mx, 'metal'):
+        if hasattr(mx, 'metal') and hasattr(mx.metal, 'device_reset'):
             mx.metal.device_reset()
         
     except AttributeError as e:
@@ -735,10 +737,13 @@ def download_lora_model_huggingface(model_name, hf_api_key):
                 force_download=True
             )
 
-            if len(safetensors_files) > 1:
-                new_filename = f"{repo_name}-{os.path.basename(filename)}"
+            if repo_name in os.path.basename(filename):
+                new_filename = os.path.basename(filename)
             else:
-                new_filename = f"{repo_name}.safetensors"
+                new_filename = f"{repo_name}-{os.path.basename(filename)}"
+            
+            if not new_filename.endswith('.safetensors'):
+                new_filename = f"{new_filename}.safetensors"
 
             new_file_path = os.path.join(LORA_DIR, new_filename)
 
@@ -761,12 +766,12 @@ def download_lora_model_huggingface(model_name, hf_api_key):
 
 def generate_image_i2i_gradio(
     prompt,
-    init_image,
+    init_image_data,
     init_image_strength,
     model,
     seed,
-    height,
     width,
+    height,
     steps,
     guidance,
     lora_files,
@@ -775,7 +780,15 @@ def generate_image_i2i_gradio(
     ollama_model,
     system_prompt
 ):
-    width, height = init_image.size
+    if init_image_data is not None:
+        if isinstance(init_image_data, dict) and 'data' in init_image_data:
+            image_data = init_image_data['data']
+            image_bytes = base64.b64decode(image_data.split(",")[1])
+            init_image = Image.open(BytesIO(image_bytes))
+        else:
+            init_image = init_image_data
+    else:
+        init_image = None
 
     if not steps or steps.strip() == "":
         base_model = model.replace("-4-bit", "").replace("-8-bit", "")
@@ -854,6 +867,9 @@ def generate_image_i2i_gradio(
     print(f"Image generated in {duration:.2f} seconds. Saved as {output_filename}")
     print_memory_usage("After saving image")
 
+    clear_flux_cache()
+    force_mlx_cleanup()
+
     return image.image, output_filename, prompt
 
 def refresh_lora_choices():
@@ -864,8 +880,52 @@ demo = None
 def refresh_lora_choices():
     return gr.update(choices=[name for name, _ in get_available_lora_files()])
 
+def scale_image_dimensions(image, scale_factor):
+    if not image:
+        return None, None
+    width, height = image.size
+    new_width = int(width * scale_factor)
+    new_height = int(height * scale_factor)
+    return new_width, new_height
+
+def update_dimensions(image, scale_factor):
+    if not image:
+        return gr.update(value=None), gr.update(value=None)
+    width, height = image.size
+    new_width = int(width * float(scale_factor))
+    new_height = int(height * float(scale_factor))
+    return gr.update(value=new_width), gr.update(value=new_height)
+
+def update_height_with_aspect_ratio(width, image):
+    if not image or not width:
+        return gr.update(value=None)
+    original_width, original_height = image.size
+    aspect_ratio = original_height / original_width
+    new_height = int(float(width) * aspect_ratio)
+    return gr.update(value=new_height)
+
+def update_width_with_aspect_ratio(height, image):
+    if not image or not height:
+        return gr.update(value=None)
+    original_width, original_height = image.size
+    aspect_ratio = original_width / original_height
+    new_width = int(float(height) * aspect_ratio)
+    return gr.update(value=new_width)
+
 def create_ui():
-    with gr.Blocks() as demo:
+    with gr.Blocks(css="""
+        .refresh-button {
+            background-color: white !important;
+            border: 1px solid #ccc !important;
+            color: black !important;
+            padding: 0px 8px !important;
+            height: 38px !important;
+            margin-left: -10px !important;
+        }
+        .refresh-button:hover {
+            background-color: #f0f0f0 !important;
+        }
+    """) as demo:
         with gr.Tabs():
             with gr.TabItem("MFLUX Easy", id=0):
                 with gr.Row():
@@ -913,7 +973,14 @@ def create_ui():
                                 interactive=True,
                                 scale=9
                             )
-                            refresh_lora_simple = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                            refresh_lora_simple = gr.Button(
+                                "🔄",
+                                variant='tool',
+                                size='sm',
+                                scale=1,
+                                min_width=30,
+                                elem_classes='refresh-button'
+                            )
                         refresh_lora_simple.click(
                             fn=refresh_lora_choices,
                             inputs=[],
@@ -975,7 +1042,14 @@ def create_ui():
                                 interactive=True,
                                 scale=9
                             )
-                            refresh_lora = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                            refresh_lora = gr.Button(
+                                "🔄",
+                                variant='tool',
+                                size='sm',
+                                scale=1,
+                                min_width=30,
+                                elem_classes='refresh-button'
+                            )
                         refresh_lora.click(
                             fn=refresh_lora_choices,
                             inputs=[],
@@ -1045,7 +1119,14 @@ def create_ui():
                                 interactive=True,
                                 scale=9
                             )
-                            refresh_lora_cn = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                            refresh_lora_cn = gr.Button(
+                                "🔄",
+                                variant='tool',
+                                size='sm',
+                                scale=1,
+                                min_width=30,
+                                elem_classes='refresh-button'
+                            )
                         refresh_lora_cn.click(
                             fn=refresh_lora_choices,
                             inputs=[],
@@ -1082,38 +1163,45 @@ def create_ui():
 
             with gr.TabItem("Image-to-Image", id=3):
                 with gr.Row():
-                    with gr.Column():
-                        with gr.Group():
-                            prompt_i2i = gr.Textbox(label="Prompt", lines=2)
-                            with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_i2i:
-                                ollama_components_i2i = create_ollama_settings()
-                            with gr.Row():
-                                enhance_ollama_i2i = gr.Button("Enhance prompt with Ollama")
-                            
-                            ollama_components_i2i[2].click(
-                                fn=save_settings,
-                                inputs=[ollama_components_i2i[0], ollama_components_i2i[1]],
-                                outputs=[ollama_section_i2i]
-                            )
-                            
-                            init_image = gr.Image(label="Initial Image", type="pil")
-                            init_image_strength = gr.Number(
-                                label="Init Image Strength (0.0 - 1.0)", 
-                                value=0.3
-                            )
-                            
-                            model_i2i = gr.Dropdown(
-                                choices=get_updated_models(),
-                                label="Model",
-                                value="schnell-4-bit"
-                            )
-                            seed_i2i = gr.Textbox(label="Seed (optional)", value="")
-                            width_i2i = gr.Number(label="Width", value=1024, precision=0, visible=False)
-                            height_i2i = gr.Number(label="Height", value=1024, precision=0, visible=False)
-                            steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="")
-                            guidance_i2i = gr.Number(label="Guidance Scale", value=4.0)
-                            lora_scale_i2i = gr.Number(label="LoRA Scale", value=1.0)
-                            
+                    with gr.Column(scale=1):
+                        prompt_i2i = gr.Textbox(label="Prompt", lines=2)
+                        with gr.Accordion("⚙️ Ollama Settings", open=False) as ollama_section_i2i:
+                            ollama_components_i2i = create_ollama_settings()
+                        with gr.Row():
+                            enhance_ollama_i2i = gr.Button("Enhance prompt with Ollama")
+                        ollama_components_i2i[2].click(
+                            fn=save_settings,
+                            inputs=[ollama_components_i2i[0], ollama_components_i2i[1]],
+                            outputs=[ollama_section_i2i]
+                        )
+
+                        init_image = gr.Image(label="Initial Image")
+                        init_image_strength = gr.Number(
+                            label="Init Image Strength (0.0 - 1.0)",
+                            value=0.3
+                        )
+
+                        width_i2i = gr.Number(label="Width")
+                        height_i2i = gr.Number(label="Height")
+                        scale_factor = gr.Slider(
+                            minimum=0.0,
+                            maximum=2.0,
+                            value=1.0,
+                            step=0.1,
+                            label="Scale Factor (%)"
+                        )
+
+                        model_i2i = gr.Dropdown(
+                            choices=get_updated_models(),
+                            label="Model",
+                            value="schnell"
+                        )
+                        seed_i2i = gr.Textbox(label="Seed (optional)", value="")
+                        steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="")
+                        guidance_i2i = gr.Number(label="Guidance Scale", value=3.5, visible=False)
+
+                        lora_scale_i2i = gr.Number(label="LoRA Scale", value=1.0)
+
                         with gr.Row():
                             lora_files_i2i = gr.Dropdown(
                                 choices=get_lora_choices(),
@@ -1124,7 +1212,14 @@ def create_ui():
                                 interactive=True,
                                 scale=9
                             )
-                            refresh_lora_i2i = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                            refresh_lora_i2i = gr.Button(
+                                "🔄",
+                                variant='tool',
+                                size='sm',
+                                scale=1,
+                                min_width=30,
+                                elem_classes='refresh-button'
+                            )
                         refresh_lora_i2i.click(
                             fn=refresh_lora_choices,
                             inputs=[],
@@ -1133,36 +1228,37 @@ def create_ui():
 
                         metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
                         generate_button_i2i = gr.Button("Generate Image", variant='primary')
-                    with gr.Column():
+
+                    with gr.Column(scale=1):
                         output_image_i2i = gr.Image(label="Generated Image")
                         output_filename_i2i = gr.Textbox(label="Saved Image Filename")
-                    
-                    enhance_ollama_i2i.click(
-                        fn=enhance_prompt,
-                        inputs=[prompt_i2i, ollama_components_i2i[0], ollama_components_i2i[1]],
-                        outputs=prompt_i2i
-                    )
-                    
-                    generate_button_i2i.click(
-                        fn=generate_image_i2i_gradio,
-                        inputs=[
-                            prompt_i2i,
-                            init_image,
-                            init_image_strength,
-                            model_i2i,
-                            seed_i2i,
-                            height_i2i,
-                            width_i2i,
-                            steps_i2i,
-                            guidance_i2i,
-                            lora_files_i2i,
-                            lora_scale_i2i,
-                            metadata_i2i,
-                            ollama_components_i2i[0],
-                            ollama_components_i2i[1],
-                        ],
-                        outputs=[output_image_i2i, output_filename_i2i, prompt_i2i]
-                    )
+
+                enhance_ollama_i2i.click(
+                    fn=enhance_prompt,
+                    inputs=[prompt_i2i, ollama_components_i2i[0], ollama_components_i2i[1]],
+                    outputs=prompt_i2i
+                )
+
+                generate_button_i2i.click(
+                    fn=generate_image_i2i_gradio,
+                    inputs=[
+                        prompt_i2i,
+                        init_image,
+                        init_image_strength,
+                        model_i2i,
+                        seed_i2i,
+                        width_i2i,
+                        height_i2i,
+                        steps_i2i,
+                        guidance_i2i,
+                        lora_files_i2i,
+                        lora_scale_i2i,
+                        metadata_i2i,
+                        ollama_components_i2i[0],
+                        ollama_components_i2i[1],
+                    ],
+                    outputs=[output_image_i2i, output_filename_i2i, prompt_i2i]
+                )
 
             with gr.TabItem("Model & LoRA Management"):
                 gr.Markdown("### Download LoRA")
