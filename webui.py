@@ -880,21 +880,32 @@ demo = None
 def refresh_lora_choices():
     return gr.update(choices=[name for name, _ in get_available_lora_files()])
 
-def scale_image_dimensions(image, scale_factor):
-    if not image:
-        return None, None
-    width, height = image.size
-    new_width = int(width * scale_factor)
-    new_height = int(height * scale_factor)
-    return new_width, new_height
+def update_dimensions_on_image_change(image):
+    if image is not None:
+        height, width = image.shape[:2]
+        return (
+            gr.update(value=width),
+            gr.update(value=height),
+            width,
+            height,
+            gr.update(value=1.0),
+        )
+    else:
+        return (
+            gr.update(value=None),
+            gr.update(value=None),
+            None,
+            None,
+            gr.update(value=1.0),
+        )
 
-def update_dimensions(image, scale_factor):
-    if not image:
+def update_dimensions_on_scale_change(scale_factor, original_width, original_height):
+    if original_width is not None and original_height is not None:
+        new_width = int(original_width * float(scale_factor))
+        new_height = int(original_height * float(scale_factor))
+        return gr.update(value=new_width), gr.update(value=new_height)
+    else:
         return gr.update(value=None), gr.update(value=None)
-    width, height = image.size
-    new_width = int(width * float(scale_factor))
-    new_height = int(height * float(scale_factor))
-    return gr.update(value=new_width), gr.update(value=new_height)
 
 def update_height_with_aspect_ratio(width, image):
     if not image or not width:
@@ -911,6 +922,15 @@ def update_width_with_aspect_ratio(height, image):
     aspect_ratio = original_width / original_height
     new_width = int(float(height) * aspect_ratio)
     return gr.update(value=new_width)
+
+def scale_dimensions(image, scale_factor):
+    if image is not None and scale_factor is not None:
+        width, height = image.size
+        new_width = int(width * float(scale_factor))
+        new_height = int(height * float(scale_factor))
+        return new_width, new_height
+    else:
+        return None, None
 
 def create_ui():
     with gr.Blocks(css="""
@@ -1096,19 +1116,43 @@ def create_ui():
                             outputs=[ollama_section_cn]
                         )
                         
-                        control_image = gr.Image(label="Control Image", type="pil")
+                        control_image = gr.Image(label="Control Image", type="numpy")
+
+                        width_cn = gr.Number(label="Width")
+                        height_cn = gr.Number(label="Height")
+                        scale_factor_cn = gr.Slider(
+                            minimum=0.0,
+                            maximum=2.0,
+                            value=1.0,
+                            step=0.1,
+                            label="Scale Factor (%)"
+                        )
+
+                        original_width_cn = gr.State()
+                        original_height_cn = gr.State()
+
+                        control_image.change(
+                            fn=update_dimensions_on_image_change,
+                            inputs=[control_image],
+                            outputs=[width_cn, height_cn, original_width_cn, original_height_cn, scale_factor_cn]
+                        )
+
+                        scale_factor_cn.change(
+                            fn=update_dimensions_on_scale_change,
+                            inputs=[scale_factor_cn, original_width_cn, original_height_cn],
+                            outputs=[width_cn, height_cn]
+                        )
+
                         model_cn = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
                             value="schnell"
                         )
                         seed_cn = gr.Textbox(label="Seed (optional)", value="")
-                        with gr.Row():
-                            width_cn = gr.Number(label="Width", value=576, precision=0)
-                            height_cn = gr.Number(label="Height", value=1024, precision=0)
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance_cn = gr.Number(label="Guidance Scale", value=3.5, visible=False)
                         controlnet_strength = gr.Number(label="ControlNet Strength", value=0.5)
+
                         with gr.Row():
                             lora_files_cn = gr.Dropdown(
                                 choices=get_lora_choices(),
@@ -1176,9 +1220,12 @@ def create_ui():
                         )
 
                         init_image = gr.Image(label="Initial Image")
-                        init_image_strength = gr.Number(
-                            label="Init Image Strength (0.0 - 1.0)",
-                            value=0.3
+                        init_image_strength = gr.Slider(
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.3,
+                            step=0.01,
+                            label="Init Image Strength"
                         )
 
                         width_i2i = gr.Number(label="Width")
@@ -1189,6 +1236,21 @@ def create_ui():
                             value=1.0,
                             step=0.1,
                             label="Scale Factor (%)"
+                        )
+
+                        original_width_i2i = gr.State()
+                        original_height_i2i = gr.State()
+
+                        init_image.change(
+                            fn=update_dimensions_on_image_change,
+                            inputs=[init_image],
+                            outputs=[width_i2i, height_i2i, original_width_i2i, original_height_i2i, scale_factor],
+                        )
+
+                        scale_factor.change(
+                            fn=update_dimensions_on_scale_change,
+                            inputs=[scale_factor, original_width_i2i, original_height_i2i],
+                            outputs=[width_i2i, height_i2i]
                         )
 
                         model_i2i = gr.Dropdown(
@@ -1418,3 +1480,5 @@ demo = create_ui()
 
 if __name__ == "__main__":
     demo.queue().launch(show_error=True)
+
+
