@@ -31,6 +31,9 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 
 flux_cache = {}
 
+def get_lora_choices():
+    return [name for name, _ in get_available_lora_files()]
+
 class CustomModelConfig:
     def __init__(self, model_name, alias, num_train_steps, max_sequence_length):
         self.model_name = model_name
@@ -42,18 +45,19 @@ class CustomModelConfig:
     def from_alias(alias):
         return get_custom_model_config(alias)
 
+MODELS = {
+    "dev": CustomModelConfig("AITRADER/MFLUXUI.1-dev", "dev", 1000, 512),
+    "schnell": CustomModelConfig("AITRADER/MFLUXUI.1-schnell", "schnell", 1000, 256),
+    "dev-8-bit": CustomModelConfig("AITRADER/MFLUX.1-dev-8-bit", "dev-8-bit", 1000, 512),
+    "dev-4-bit": CustomModelConfig("AITRADER/MFLUX.1-dev-4-bit", "dev-4-bit", 1000, 512),
+    "schnell-8-bit": CustomModelConfig("AITRADER/MFLUX.1-schnell-8-bit", "schnell-8-bit", 1000, 256),
+    "schnell-4-bit": CustomModelConfig("AITRADER/MFLUX.1-schnell-4-bit", "schnell-4-bit", 1000, 256),
+}
+
 def get_custom_model_config(model_alias):
-    models = {
-        "dev": CustomModelConfig("AITRADER/MFLUXUI.1-dev", "dev", 1000, 512),
-        "schnell": CustomModelConfig("AITRADER/MFLUXUI.1-schnell", "schnell", 1000, 256),
-        "dev-8-bit": CustomModelConfig("AITRADER/MFLUX.1-dev-8-bit", "dev-8-bit", 1000, 512),
-        "dev-4-bit": CustomModelConfig("AITRADER/MFLUX.1-dev-4-bit", "dev-4-bit", 1000, 512),
-        "schnell-8-bit": CustomModelConfig("AITRADER/MFLUX.1-schnell-8-bit", "schnell-8-bit", 1000, 256),
-        "schnell-4-bit": CustomModelConfig("AITRADER/MFLUX.1-schnell-4-bit", "schnell-4-bit", 1000, 256),
-    }
-    config = models.get(model_alias)
+    config = MODELS.get(model_alias)
     if config is None:
-        raise ValueError(f"Invalid model alias: {model_alias}. Available aliases are: {', '.join(models.keys())}")
+        raise ValueError(f"Invalid model alias: {model_alias}. Available aliases are: {', '.join(MODELS.keys())}")
     return config
 
 from huggingface_hub import snapshot_download
@@ -120,7 +124,14 @@ def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_contro
     return flux
 
 def get_available_lora_files():
-    return [(f.stem, str(f)) for f in Path(LORA_DIR).rglob("*.safetensors")]
+    lora_files = []
+    for root, dirs, files in os.walk(LORA_DIR):
+        for file in files:
+            if file.endswith(".safetensors"):
+                display_name = os.path.splitext(file)[0]
+                lora_files.append((display_name, os.path.join(root, file)))
+    lora_files.sort(key=lambda x: x[0].lower())
+    return lora_files
 
 def get_available_models():
     standard_models = ["schnell-4-bit", "schnell-8-bit", "dev-4-bit", "dev-8-bit", "schnell", "dev"]
@@ -525,36 +536,42 @@ def force_mlx_cleanup():
 def update_guidance_visibility(model):
     return gr.update(visible="dev" in model)
 
-def save_api_key(api_key):
+def save_api_key(api_key, key_type="civitai"):
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     config = {}
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = json.load(f)
-    config["civitai_api_key"] = api_key
+    config[f"{key_type}_api_key"] = api_key
     with open(config_path, "w") as f:
         json.dump(config, f)
     return "API key saved successfully"
 
-def load_api_key():
+def load_api_key(key_type="civitai"):
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = json.load(f)
-        return config.get("civitai_api_key", "")
+        return config.get(f"{key_type}_api_key", "")
     return ""
 
 def download_lora_model(page_url, api_key):
+    def slugify(value):
+        value = str(value)
+        value = re.sub('[^\w\s-]', '', value).strip().lower()
+        value = re.sub('[-\s]+', '-', value)
+        return value
+
     if not api_key:
         return gr.update(), gr.update(), gr.update(), "Error: API key is missing"
 
     try:
         print(f"Starting download process for URL: {page_url}")
-        model_id = re.search(r'/models/(\d+)', page_url)
-        if not model_id:
+        model_id_match = re.search(r'/models/(\d+)', page_url)
+        if not model_id_match:
             return gr.update(), gr.update(), gr.update(), f"Error: Could not extract model ID from the URL: {page_url}"
 
-        model_id = model_id.group(1)
+        model_id = model_id_match.group(1)
         api_url = f"https://civitai.com/api/v1/models/{model_id}"
         
         headers = {
@@ -569,7 +586,16 @@ def download_lora_model(page_url, api_key):
         if not model_data.get('modelVersions'):
             return gr.update(), gr.update(), gr.update(), "Error: No model versions found"
 
+        model_name = model_data.get('name', f"model_{model_id}")
         latest_version = model_data['modelVersions'][0]
+        version_name = latest_version.get('name', 'unknown_version')
+
+        model_name_slug = slugify(model_name)
+        version_name_slug = slugify(version_name)
+
+        filename = f"{model_name_slug}-{version_name_slug}.safetensors"
+        file_path = os.path.join(LORA_DIR, filename)
+
         download_url = latest_version['downloadUrl']
         
         print(f"Download URL: {download_url}")
@@ -577,13 +603,6 @@ def download_lora_model(page_url, api_key):
         download_response = requests.get(download_url, headers=headers, stream=True)
         download_response.raise_for_status()
 
-        content_disposition = download_response.headers.get('Content-Disposition')
-        if content_disposition:
-            filename = re.findall("filename=(.+)", content_disposition)[0].strip('"')
-        else:
-            filename = f"model_{model_id}.safetensors"
-
-        file_path = os.path.join(LORA_DIR, filename)
         total_size = int(download_response.headers.get('content-length', 0))
         
         print(f"Saving to: {file_path}")
@@ -632,7 +651,10 @@ def get_updated_lora_files():
     return lora_files
 
 def get_updated_models():
-    return get_available_models()
+    predefined_models = list(MODELS.keys())
+    custom_models = [f.name for f in Path(MODELS_DIR).iterdir() if f.is_dir()]
+    all_models = predefined_models + [m for m in custom_models if m not in predefined_models]
+    return sorted(all_models, key=str.lower)
 
 def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_length, api_key):
     try:
@@ -673,8 +695,7 @@ def load_hf_api_key():
         return ''
 
 def save_hf_api_key(api_key):
-    with open('hf_api_key.json', 'w') as f:
-        json.dump({'api_key': api_key}, f)
+    return save_api_key(api_key, "huggingface")
 
 def login_huggingface(api_key):
     try:
@@ -691,34 +712,50 @@ def download_lora_model_huggingface(model_name, hf_api_key):
 
     try:
         api = HfApi(token=hf_api_key if hf_api_key else None)
-        
+
+        if '/' in model_name:
+            owner, repo_name = model_name.split('/', 1)
+        else:
+            repo_name = model_name
+
         files = api.list_repo_files(repo_id=model_name)
 
         safetensors_files = [f for f in files if f.endswith(".safetensors")]
 
         if not safetensors_files:
-            return gr.update(), gr.update(), gr.update(), f"Error: No .safetensors files found in the model repository '{model_name}'"
+            return gr.update(), gr.update(), gr.update(), f"Error: No .safetensors files found in the repository '{model_name}'"
 
+        downloaded_files = []
         for filename in safetensors_files:
-
-            hf_hub_download(
+            local_file_path = hf_hub_download(
                 repo_id=model_name,
                 filename=filename,
                 local_dir=LORA_DIR,
-                use_auth_token=hf_api_key
+                use_auth_token=hf_api_key,
+                force_download=True
             )
 
-        print(f"Download voltooid: {safetensors_files}")
+            if len(safetensors_files) > 1:
+                new_filename = f"{repo_name}-{os.path.basename(filename)}"
+            else:
+                new_filename = f"{repo_name}.safetensors"
+
+            new_file_path = os.path.join(LORA_DIR, new_filename)
+
+            os.rename(local_file_path, new_file_path)
+            downloaded_files.append(new_filename)
+
+        print(f"Download completed: {', '.join(downloaded_files)}")
         updated_lora_files = get_updated_lora_files()
         return (
             gr.update(choices=updated_lora_files),
             gr.update(choices=updated_lora_files),
             gr.update(choices=updated_lora_files),
-            f"Download voltooid: {', '.join(safetensors_files)}"
+            f"Download completed: {', '.join(downloaded_files)}"
         )
 
     except Exception as e:
-        error_message = f"Fout bij het downloaden van LoRA van HuggingFace: {str(e)}"
+        error_message = f"Error downloading LoRA from HuggingFace: {str(e)}"
         print(f"Error: {error_message}")
         return gr.update(), gr.update(), gr.update(), error_message
 
@@ -819,7 +856,13 @@ def generate_image_i2i_gradio(
 
     return image.image, output_filename, prompt
 
+def refresh_lora_choices():
+    return gr.update(choices=[name for name, _ in get_available_lora_files()])
+
 demo = None
+
+def refresh_lora_choices():
+    return gr.update(choices=[name for name, _ in get_available_lora_files()])
 
 def create_ui():
     with gr.Blocks() as demo:
@@ -843,7 +886,8 @@ def create_ui():
                         model_simple = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
-                            value="schnell-4-bit"
+                            value="schnell-4-bit",
+                            allow_custom_value=True
                         )
                         image_format = gr.Dropdown(
                             choices=[
@@ -859,14 +903,24 @@ def create_ui():
                             label="Image Format",
                             value="Portrait (576x1024)"
                         )
-                        lora_files_simple = gr.Dropdown(
-                            choices=[name for name, _ in get_available_lora_files()],
-                            label="Select LoRA Files",
-                            multiselect=True,
-                            allow_custom_value=True,
-                            value=[]
+                        with gr.Row():
+                            lora_files_simple = gr.Dropdown(
+                                choices=get_lora_choices(),
+                                label="Select LoRA Files",
+                                multiselect=True,
+                                allow_custom_value=True,
+                                value=[],
+                                interactive=True,
+                                scale=9
+                            )
+                            refresh_lora_simple = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                        refresh_lora_simple.click(
+                            fn=refresh_lora_choices,
+                            inputs=[],
+                            outputs=[lora_files_simple]
                         )
-                        generate_button_simple = gr.Button("Generate Image")
+
+                        generate_button_simple = gr.Button("Generate Image", variant='primary')
                     
                     with gr.Column():
                         output_image_simple = gr.Image(label="Generated Image")
@@ -911,15 +965,25 @@ def create_ui():
                             height = gr.Number(label="Height", value=1024, precision=0)
                         steps = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance = gr.Number(label="Guidance Scale", value=3.5, visible=False)
-                        lora_files = gr.Dropdown(
-                            choices=[name for name, _ in get_available_lora_files()],
-                            label="Select LoRA Files",
-                            multiselect=True,
-                            allow_custom_value=True,
-                            value=[]
+                        with gr.Row():
+                            lora_files = gr.Dropdown(
+                                choices=get_lora_choices(),
+                                label="Select LoRA Files",
+                                multiselect=True,
+                                allow_custom_value=True,
+                                value=[],
+                                interactive=True,
+                                scale=9
+                            )
+                            refresh_lora = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                        refresh_lora.click(
+                            fn=refresh_lora_choices,
+                            inputs=[],
+                            outputs=[lora_files]
                         )
+
                         metadata = gr.Checkbox(label="Export Metadata as JSON", value=False)
-                        generate_button = gr.Button("Generate Image")
+                        generate_button = gr.Button("Generate Image", variant='primary')
                     with gr.Column():
                         output_image = gr.Image(label="Generated Image")
                         output_filename = gr.Textbox(label="Saved Image Filename")
@@ -971,22 +1035,32 @@ def create_ui():
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance_cn = gr.Number(label="Guidance Scale", value=3.5, visible=False)
                         controlnet_strength = gr.Number(label="ControlNet Strength", value=0.5)
-                        lora_files_cn = gr.Dropdown(
-                            choices=[name for name, _ in get_available_lora_files()],
-                            label="Select LoRA Files",
-                            multiselect=True,
-                            allow_custom_value=True,
-                            value=[]
+                        with gr.Row():
+                            lora_files_cn = gr.Dropdown(
+                                choices=get_lora_choices(),
+                                label="Select LoRA Files",
+                                multiselect=True,
+                                allow_custom_value=True,
+                                value=[],
+                                interactive=True,
+                                scale=9
+                            )
+                            refresh_lora_cn = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                        refresh_lora_cn.click(
+                            fn=refresh_lora_choices,
+                            inputs=[],
+                            outputs=[lora_files_cn]
                         )
+
                         metadata_cn = gr.Checkbox(label="Export Metadata as JSON", value=False)
                         save_canny = gr.Checkbox(label="Save Canny Edge Detection Image", value=False)
-                        generate_button_cn = gr.Button("Generate Image")
+                        generate_button_cn = gr.Button("Generate Image", variant='primary')
                     with gr.Column():
                         output_image_cn = gr.Image(label="Generated Image")
                         output_message_cn = gr.Textbox(label="Status")
                 enhance_ollama_cn.click(
                     fn=enhance_prompt,
-                    inputs=[prompt, ollama_components_cn[0], ollama_components_cn[1]],
+                    inputs=[prompt_cn, ollama_components_cn[0], ollama_components_cn[1]],
                     outputs=prompt_cn
                 )
                 
@@ -1038,19 +1112,30 @@ def create_ui():
                             height_i2i = gr.Number(label="Height", value=1024, precision=0, visible=False)
                             steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="")
                             guidance_i2i = gr.Number(label="Guidance Scale", value=4.0)
+                            lora_scale_i2i = gr.Number(label="LoRA Scale", value=1.0)
+                            
+                        with gr.Row():
                             lora_files_i2i = gr.Dropdown(
-                                choices=[name for name, _ in get_available_lora_files()],
+                                choices=get_lora_choices(),
                                 label="Select LoRA Files",
                                 multiselect=True,
                                 allow_custom_value=True,
-                                value=[]
+                                value=[],
+                                interactive=True,
+                                scale=9
                             )
-                            lora_scale_i2i = gr.Number(label="LoRA Scale", value=1.0)
-                            metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
-                            generate_button_i2i = gr.Button("Generate Image")
-                        with gr.Column():
-                            output_image_i2i = gr.Image(label="Generated Image")
-                            output_filename_i2i = gr.Textbox(label="Saved Image Filename")
+                            refresh_lora_i2i = gr.Button("🔄", scale=1, min_width=30, size='sm')
+                        refresh_lora_i2i.click(
+                            fn=refresh_lora_choices,
+                            inputs=[],
+                            outputs=[lora_files_i2i]
+                        )
+
+                        metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
+                        generate_button_i2i = gr.Button("Generate Image", variant='primary')
+                    with gr.Column():
+                        output_image_i2i = gr.Image(label="Generated Image")
+                        output_filename_i2i = gr.Textbox(label="Saved Image Filename")
                     
                     enhance_ollama_i2i.click(
                         fn=enhance_prompt,
@@ -1078,6 +1163,7 @@ def create_ui():
                         ],
                         outputs=[output_image_i2i, output_filename_i2i, prompt_i2i]
                     )
+
             with gr.TabItem("Model & LoRA Management"):
                 gr.Markdown("### Download LoRA")
                 lora_source = gr.Radio(
@@ -1096,41 +1182,40 @@ def create_ui():
                             api_key_input = gr.Textbox(
                                 label="CivitAI API Key", 
                                 type="password", 
-                                value=load_api_key()
+                                value=load_api_key("civitai")
                             )
                             civitai_api_key_status = gr.Markdown(
-                                value=f"CivitAI API Key Status: {'Saved' if load_api_key() else 'Not saved'}"
+                                value=f"CivitAI API Key Status: {'Saved' if load_api_key('civitai') else 'Not saved'}"
                             )
                             
                             hf_api_key_input = gr.Textbox(
                                 label="HuggingFace API Key", 
                                 type="password", 
-                                value=load_hf_api_key()
+                                value=load_api_key("huggingface")
                             )
                             hf_api_key_status = gr.Markdown(
-                                value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}"
+                                value=f"HuggingFace API Key Status: {'Saved' if load_api_key('huggingface') else 'Not saved'}"
                             )
                         with gr.Column(scale=1):
                             save_api_keys_button = gr.Button("Save API Keys")
                             clear_api_keys_button = gr.Button("Clear API Keys")
                     gr.Markdown("Don't have an API key? [CivitAI](https://civitai.com/user/account), [HuggingFace](https://huggingface.co/settings/tokens)")
 
-                download_lora_button = gr.Button("Download LoRA")
+                download_lora_button = gr.Button("Download LoRA", variant='primary')
                 lora_download_status = gr.Textbox(label="Download Status", lines=0.5)
 
                 def save_api_keys(api_key_civitai, api_key_hf):
-                    save_api_key(api_key_civitai)
-                    save_hf_api_key(api_key_hf)
-                    civitai_status = f"CivitAI API Key Status: {'Saved successfully' if api_key_civitai else 'Not saved'}"
-                    hf_status = f"HuggingFace API Key Status: {'Saved successfully' if api_key_hf else 'Not saved'}"
-                    return civitai_status, hf_status
+                    save_api_key(api_key_civitai, "civitai")
+                    save_api_key(api_key_hf, "huggingface")
+                    return (
+                        f"CivitAI API Key Status: {'Saved successfully' if api_key_civitai else 'Not saved'}", 
+                        f"HuggingFace API Key Status: {'Saved successfully' if api_key_hf else 'Not saved'}"
+                    )
 
                 def clear_api_keys():
-                    save_api_key("")
-                    save_hf_api_key("")
-                    civitai_status = "CivitAI API Key Status: Cleared"
-                    hf_status = "HuggingFace API Key Status: Cleared"
-                    return civitai_status, hf_status
+                    save_api_key("", "civitai")
+                    save_api_key("", "huggingface")
+                    return "CivitAI API Key Status: Cleared", "HuggingFace API Key Status: Cleared"
 
                 save_api_keys_button.click(
                     fn=save_api_keys,
@@ -1183,7 +1268,7 @@ def create_ui():
                             gr.Markdown("Don't have an API key? [Create one here](https://huggingface.co/settings/tokens)")
                         
                     with gr.Column(scale=1):
-                        download_button = gr.Button("Download and Add Model")
+                        download_button = gr.Button("Download and Add Model", variant='primary')
                         download_output = gr.Textbox(label="Download Status", lines=3)
 
                 def save_hf_api_key_handler(key):
@@ -1222,7 +1307,7 @@ def create_ui():
                         )
                         quantize_level = gr.Radio(choices=["4", "8"], label="Quantize Level", value="8")
                     with gr.Column(scale=1):
-                        save_button = gr.Button("Save Quantized Model")
+                        save_button = gr.Button("Save Quantized Model", variant='primary')
                         save_output = gr.Textbox(label="Quantization Output", lines=3)
 
                 save_button.click(
