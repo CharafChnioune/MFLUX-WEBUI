@@ -18,3 +18,5 @@ dist/
 config.json
 hf_api_key.json
 ollama_settings.json
+
+test_webui.py
