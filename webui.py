@@ -1083,7 +1083,7 @@ def create_ui():
                                 interactive=True,
                                 scale=9
                             )
-                            refresh_lora = gr.Button(
+                            refresh_lora_simple = gr.Button(
                                 "🔄",
                                 variant='tool',
                                 size='sm',
@@ -1091,7 +1091,7 @@ def create_ui():
                                 min_width=30,
                                 elem_classes='refresh-button'
                             )
-                        refresh_lora.click(
+                        refresh_lora_simple.click(
                             fn=refresh_lora_choices,
                             inputs=[],
                             outputs=[lora_files]
@@ -1170,6 +1170,7 @@ def create_ui():
                             label="Model",
                             value="schnell-4-bit"
                         )
+                        
                         seed_cn = gr.Textbox(label="Seed (optional)", value="")
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
                         guidance_cn = gr.Number(label="Guidance Scale", value=3.5, visible=False)
@@ -1360,9 +1361,6 @@ def create_ui():
                 )
                 lora_input = gr.Textbox(label="LoRA Model Page URL (CivitAI) or Model Name (HuggingFace)")
 
-                civitai_api_key_status = gr.Markdown(value=f"CivitAI API Key Status: {'Saved' if load_api_key() else 'Not saved'}")
-                hf_api_key_status = gr.Markdown(value=f"HuggingFace API Key Status: {'Saved' if load_hf_api_key() else 'Not saved'}")
-
                 with gr.Accordion("API Key Settings", open=False):
                     with gr.Row():
                         with gr.Column(scale=3):
@@ -1509,5 +1507,3 @@ demo = create_ui()
 
 if __name__ == "__main__":
     demo.queue().launch(show_error=True)
-
-
