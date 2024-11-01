@@ -1,4 +1,5 @@
 import tempfile
+import traceback
 import gradio as gr
 import time
 import os
@@ -23,6 +24,7 @@ from PIL import Image
 from mflux.ui.cli.parsers import CommandLineParser
 import base64
 from io import BytesIO
+import numpy as np
 
 LORA_DIR = os.path.join(os.path.dirname(__file__), "lora")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
@@ -92,9 +94,9 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     except Exception as e:
         return f"Error: {str(e)}"
 
-def get_or_create_flux(model, quantize, path, lora_paths, lora_scales, is_controlnet=False):
-    lora_paths = lora_paths if lora_paths else None
-    lora_scales = lora_scales if lora_scales else None
+def get_or_create_flux(model, quantize, path, lora_paths_tuple, lora_scales_tuple, is_controlnet=False):
+    lora_paths = list(lora_paths_tuple) if lora_paths_tuple else None
+    lora_scales = list(lora_scales_tuple) if lora_scales_tuple else None
     
     FluxClass = Flux1Controlnet if is_controlnet else Flux1
     
@@ -205,10 +207,6 @@ def print_memory_usage(label):
 def generate_image_gradio(
     prompt, model, seed, height, width, steps, guidance, lora_files, metadata, ollama_model, system_prompt
 ):
-
-    width = width - (width % 16)
-    height = height - (height % 16)
-
     print(f"\n--- Generating image (Advanced) ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
@@ -220,58 +218,68 @@ def generate_image_gradio(
 
     start_time = time.time()
 
-    valid_loras = process_lora_files(lora_files)
-    lora_paths = valid_loras if valid_loras else None
-    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
+    try:
 
-    seed = None if seed == "" else int(seed)
+        valid_loras = process_lora_files(lora_files)
+        lora_paths = valid_loras if valid_loras else None
+        lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
-    if not steps or steps.strip() == "":
-        base_model = model.replace("-4-bit", "").replace("-8-bit", "")
-        if "schnell" in base_model:
-            steps = 4
-        elif "dev" in base_model:
-            steps = 20
+        seed = None if seed == "" else int(seed)
+
+        if not steps or steps.strip() == "":
+            base_model = model.replace("-4-bit", "").replace("-8-bit", "")
+            if "schnell" in base_model:
+                steps = 4
+            elif "dev" in base_model:
+                steps = 20
+            else:
+                steps = 20
         else:
-            steps = 20
-    else:
-        steps = int(steps)
+            steps = int(steps)
 
-    flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
+        flux = get_or_create_flux(model, None, None, lora_paths, lora_scales)
 
-    print_memory_usage("After creating flux")
+        print_memory_usage("After creating flux")
 
-    timestamp = int(time.time())
-    output_filename = f"generated_{timestamp}.png"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+        timestamp = int(time.time())
+        output_filename = f"generated_{timestamp}.png"
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-    image = flux.generate_image(
-        seed=int(time.time()) if seed is None else seed,
-        prompt=prompt,
-        config=Config(
-            num_inference_steps=steps,
-            height=height,
-            width=width,
-            guidance=guidance,
-        ),
-    )
+        image = flux.generate_image(
+            seed=int(time.time()) if seed is None else seed,
+            prompt=prompt,
+            config=Config(
+                num_inference_steps=steps,
+                height=height,
+                width=width,
+                guidance=guidance,
+            ),
+        )
 
-    image.image.save(output_path)
+        image.save(output_path)
 
-    print_memory_usage("After generating image")
+        print_memory_usage("After generating image")
+        print_memory_usage("After saving image")
 
-    print_memory_usage("After saving image")
+        del flux
+        del image
+        gc.collect()
+        force_mlx_cleanup()
 
-    del flux
-    del image
-    gc.collect()
-    force_mlx_cleanup()
+        end_time = time.time()
+        generation_time = end_time - start_time
+        print(f"Generation time: {generation_time:.2f} seconds")
 
-    end_time = time.time()
-    generation_time = end_time - start_time
-    print(f"Generation time: {generation_time:.2f} seconds")
+        return output_path, output_filename, prompt
 
-    return image.image, output_filename, prompt
+    except Exception as e:
+        print(f"Error generating image: {str(e)}")
+        traceback.print_exc()
+        return None, None, prompt
+
+    finally:
+        force_mlx_cleanup()
+        gc.collect()
 
 def generate_image_controlnet_gradio(
     prompt,
@@ -290,49 +298,45 @@ def generate_image_controlnet_gradio(
     system_prompt
 ):
     print(f"\n--- Generating image (ControlNet) ---")
-    print(f"Model: {model}")
-    print(f"Prompt: {prompt}")
-    print(f"Dimensions: {height}x{width}")
-    print(f"Steps: {steps}")
-    print(f"Guidance: {guidance}")
-    print(f"ControlNet Strength: {controlnet_strength}")
-    print(f"LoRA files: {lora_files}")
+    print(f"Received parameters:")
+    print(f"- prompt: {prompt}")
+    print(f"- model: {model}")
+    print(f"- seed: {seed}")
+    print(f"- height: {height}")
+    print(f"- width: {width}") 
+    print(f"- steps: {steps}")
+    print(f"- guidance: {guidance}")
+    print(f"- controlnet_strength: {controlnet_strength}")
+    print(f"- lora_files: {lora_files}")
+    print(f"- save_canny: {save_canny}")
+
     print_memory_usage("Before generation")
-
     start_time = time.time()
-
-    valid_loras = process_lora_files(lora_files)
-    lora_paths = valid_loras if valid_loras else None
-    lora_scales = [1.0] * len(valid_loras) if valid_loras else None
-
-    if "dev" not in model:
-        guidance = 0
-
-    seed = None if seed == "" else int(seed)
-    steps = None if steps == "" else int(steps)
-
-    flux = get_or_create_flux(model, None, None, lora_paths, lora_scales, is_controlnet=True)
-
-    print_memory_usage("After creating flux")
-
-    if steps is None:
-        steps = 4 if model == "schnell" else 14
-
-    timestamp = int(time.time())
-    output_filename = f"generated_controlnet_{timestamp}.png"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
-
+    generated_image = None
+    canny_image_to_return = None
     try:
-        if control_image is None:
-            raise ValueError("Control image is required for ControlNet generation")
+        valid_loras = process_lora_files(lora_files)
+        lora_paths = valid_loras if valid_loras else None
+        lora_scales = [1.0] * len(valid_loras) if valid_loras else None
 
+        seed = None if seed == "" else int(seed)
+        steps = None if steps == "" else int(steps)
+        if steps is None:
+            steps = 4 if "schnell" in model else 14
+
+        flux = get_or_create_flux(
+            model, 
+            None, 
+            None,
+            lora_paths,
+            lora_scales,
+            is_controlnet=True
+        )
+
+        timestamp = int(time.time())
         control_image_path = os.path.join(OUTPUT_DIR, f"control_image_{timestamp}.png")
+        output_path = os.path.join(OUTPUT_DIR, f"generated_controlnet_{timestamp}.png")
         control_image.save(control_image_path)
-
-        if save_canny:
-            canny_image_filename = f"canny_image_{timestamp}.png"
-            canny_image_path = os.path.join(OUTPUT_DIR, canny_image_filename)
-            control_image.save(canny_image_path)
 
         generated_image = flux.generate_image(
             seed=int(time.time()) if seed is None else seed,
@@ -345,26 +349,41 @@ def generate_image_controlnet_gradio(
                 guidance=guidance,
                 controlnet_strength=controlnet_strength,
             ),
-            output=output_path
+            output=output_path,
+            controlnet_save_canny=save_canny
         )
-        
-        print_memory_usage("After generating image")
-        
-        os.remove(control_image_path)
-        
-        output_image = generated_image.image
 
-        del flux
+        canny_image = None
+        if save_canny:
+            canny_path = output_path.replace('.png', '_controlnet_canny.png')
+            if os.path.exists(canny_path):
+                canny_image = Image.open(canny_path)
+                print(f"Canny image geladen van {canny_path}")
+            else:
+                print(f"Canny image niet gevonden op {canny_path}")
+
+        print_memory_usage("After generating image")
+
+        generated_image.image.save(output_path)
+
+        print(f"Generation completed in {time.time() - start_time:.2f}s")
+        return generated_image.image, "Generation successful!", prompt, canny_image
+
+    except Exception as e:
+        print(f"\nError in ControlNet generation: {str(e)}")
+        print(f"Full traceback:")
+        traceback.print_exc()
+        return None, f"Error: {str(e)}", prompt, None
+
+    finally:
+        if 'control_image_path' in locals() and os.path.exists(control_image_path):
+            os.remove(control_image_path)
+        if flux:
+            del flux
+        if generated_image:
+            del generated_image
         gc.collect()
         force_mlx_cleanup()
-
-        end_time = time.time()
-        generation_time = end_time - start_time
-        print(f"Generation time: {generation_time:.2f} seconds")
-
-        return output_image, f"Image generated successfully! Saved as {output_filename}", prompt
-    except Exception as e:
-        return None, f"Error generating image: {str(e)}", prompt
 
 def process_lora_files(selected_loras):
     if not selected_loras:
@@ -653,10 +672,12 @@ def get_updated_lora_files():
     return lora_files
 
 def get_updated_models():
-    predefined_models = list(MODELS.keys())
+    predefined_models = ["schnell-4-bit", "dev-4-bit", "schnell-8-bit", "dev-8-bit", "schnell", "dev"]
     custom_models = [f.name for f in Path(MODELS_DIR).iterdir() if f.is_dir()]
-    all_models = predefined_models + [m for m in custom_models if m not in predefined_models]
-    return sorted(all_models, key=str.lower)
+    custom_models = [m for m in custom_models if m not in predefined_models]
+    custom_models.sort(key=str.lower)
+    all_models = predefined_models + custom_models
+    return all_models
 
 def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_length, api_key):
     try:
@@ -766,7 +787,7 @@ def download_lora_model_huggingface(model_name, hf_api_key):
 
 def generate_image_i2i_gradio(
     prompt,
-    init_image_data,
+    init_image,
     init_image_strength,
     model,
     seed,
@@ -780,15 +801,15 @@ def generate_image_i2i_gradio(
     ollama_model,
     system_prompt
 ):
-    if init_image_data is not None:
-        if isinstance(init_image_data, dict) and 'data' in init_image_data:
-            image_data = init_image_data['data']
-            image_bytes = base64.b64decode(image_data.split(",")[1])
-            init_image = Image.open(BytesIO(image_bytes))
-        else:
-            init_image = init_image_data
-    else:
-        init_image = None
+    if init_image is None:
+        return None, None, prompt
+
+    if not isinstance(init_image, Image.Image):
+        init_image = Image.fromarray(init_image)
+
+    width = int(width - (width % 16))
+    height = int(height - (height % 16))
+    init_image = init_image.resize((width, height))
 
     if not steps or steps.strip() == "":
         base_model = model.replace("-4-bit", "").replace("-8-bit", "")
@@ -882,7 +903,7 @@ def refresh_lora_choices():
 
 def update_dimensions_on_image_change(image):
     if image is not None:
-        height, width = image.shape[:2]
+        width, height = image.size
         return (
             gr.update(value=width),
             gr.update(value=height),
@@ -1044,7 +1065,7 @@ def create_ui():
                         model = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
-                            value="schnell"
+                            value="schnell-4-bit"
                         )
                         seed = gr.Textbox(label="Seed (optional)", value="")
                         with gr.Row():
@@ -1116,7 +1137,8 @@ def create_ui():
                             outputs=[ollama_section_cn]
                         )
                         
-                        control_image = gr.Image(label="Control Image", type="numpy")
+                        control_image = gr.Image(label="Control Image", type="pil")
+                        canny_image = gr.Image(label="Canny Image", type="pil", visible=False)
 
                         width_cn = gr.Number(label="Width")
                         height_cn = gr.Number(label="Height")
@@ -1146,7 +1168,7 @@ def create_ui():
                         model_cn = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
-                            value="schnell"
+                            value="schnell-4-bit"
                         )
                         seed_cn = gr.Textbox(label="Seed (optional)", value="")
                         steps_cn = gr.Textbox(label="Inference Steps (optional)", value="")
@@ -1182,6 +1204,7 @@ def create_ui():
                         generate_button_cn = gr.Button("Generate Image", variant='primary')
                     with gr.Column():
                         output_image_cn = gr.Image(label="Generated Image")
+                        canny_image = gr.Image(label="Canny Image", visible=False)
                         output_message_cn = gr.Textbox(label="Status")
                 enhance_ollama_cn.click(
                     fn=enhance_prompt,
@@ -1194,7 +1217,7 @@ def create_ui():
                     inputs=[prompt_cn, control_image, model_cn, seed_cn, height_cn, width_cn, steps_cn, 
                             guidance_cn, controlnet_strength, lora_files_cn, metadata_cn, save_canny,
                             ollama_components_cn[0], ollama_components_cn[1]],
-                    outputs=[output_image_cn, output_message_cn, prompt_cn]
+                    outputs=[output_image_cn, output_message_cn, prompt_cn, canny_image]
                 )
 
                 gr.Markdown("""
@@ -1204,6 +1227,12 @@ def create_ui():
                 ⚠ Note: The output can be highly sensitive to the controlnet strength and is very much dependent on the reference image. 
                 Too high settings will corrupt the image. A recommended starting point is a value like 0.4. Experiment with different strengths to find the best result.
                 """)
+
+                save_canny.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=save_canny,
+                    outputs=canny_image
+                )
 
             with gr.TabItem("Image-to-Image", id=3):
                 with gr.Row():
@@ -1219,7 +1248,7 @@ def create_ui():
                             outputs=[ollama_section_i2i]
                         )
 
-                        init_image = gr.Image(label="Initial Image")
+                        init_image = gr.Image(label="Initial Image", type='pil')
                         init_image_strength = gr.Slider(
                             minimum=0.0,
                             maximum=1.0,
@@ -1256,7 +1285,7 @@ def create_ui():
                         model_i2i = gr.Dropdown(
                             choices=get_updated_models(),
                             label="Model",
-                            value="schnell"
+                            value="schnell-4-bit"
                         )
                         seed_i2i = gr.Textbox(label="Seed (optional)", value="")
                         steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="")
