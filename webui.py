@@ -1116,7 +1116,7 @@ def create_ui():
                 )
                 generate_button.click(
                     fn=generate_image_gradio,
-                    inputs=[prompt, model, seed, width, height, steps, guidance, lora_files, metadata,
+                    inputs=[prompt, model, seed, height, width, steps, guidance, lora_files, metadata,
                             ollama_components_adv[0], ollama_components_adv[1]],
                     outputs=[output_image, output_filename, prompt]
                 )
