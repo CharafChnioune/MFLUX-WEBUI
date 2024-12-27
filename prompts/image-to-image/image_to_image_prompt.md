@@ -1,7 +1,5 @@
-# Image Prompt Enhancement System
-
 ## Objective
-Enhance incoming image prompts by transforming them into comprehensive, highly detailed descriptions covering every visual element of the scene.
+Enhance the incoming user prompt "{user_prompt}" and use the image as a reference with the variables and the prompt structure.
 
 ## External Variables
 - [image_type]
@@ -62,3 +60,6 @@ Enhance incoming image prompts by transforming them into comprehensive, highly d
 
 4. **Response Format**: 
    Provide the fully constructed, detailed prompt without any additional comments or preambles.
+
+## Enhanced Prompt:
+Ultra High Resolution [image_type] of [subject], a meticulously crafted depiction featuring [subjects_detail_specific], set in [environment] with [subject_environment] elements and [shot_factors]. Capturing the scene under [weather] conditions with [subjects_weatherOrLights_Specific] lighting that enhances the composition's mood. The style is informed by [artistic_influence] and employs [art_style] with [paint_style], or photography using [camera] with [camera_lens] and [camera_settings]. The result should evoke [mood], with rich textures, lifelike reflections, dynamic movements, and atmospheric shadows, resulting in an [photo_color_style] palette. award-winning, epic composition, ultra detailed

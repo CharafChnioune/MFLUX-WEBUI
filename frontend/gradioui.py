@@ -1,0 +1,157 @@
+# frontend/gradioui.py
+
+import os
+import json
+import random
+import gradio as gr
+from pathlib import Path
+from PIL import Image
+from mflux.config.config import Config, ConfigControlnet
+from typing import List, Tuple
+
+# Import components
+from frontend.components.easy_mflux import create_easy_mflux_tab
+from frontend.components.advanced_generate import create_advanced_generate_tab
+from frontend.components.controlnet import create_controlnet_tab
+from frontend.components.image_to_image import create_image_to_image_tab
+from frontend.components.model_lora_management import create_model_lora_management_tab
+from frontend.components.dreambooth_fine_tuning import create_dreambooth_fine_tuning_tab
+
+# Backend imports
+from backend.model_manager import (
+    get_updated_models,
+    get_custom_model_config,
+    download_and_save_model,
+    save_quantized_model_gradio,
+    login_huggingface
+)
+from backend.lora_manager import (
+    get_lora_choices,
+    process_lora_files,
+    update_lora_scales,
+    download_lora_model,
+    get_updated_lora_files,
+    refresh_lora_choices,
+    MAX_LORAS
+)
+from backend.flux_manager import (
+    get_random_seed,
+    simple_generate_image,
+    generate_image_gradio,
+    generate_image_controlnet_gradio,
+    generate_image_i2i_gradio
+)
+from backend.mlx_vlm_manager import (
+    get_available_mlx_vlm_models,
+    generate_caption_with_mlx_vlm
+)
+from backend.captions import (
+    show_uploaded_images,
+    fill_captions
+)
+from backend.ollama_manager import (
+    create_ollama_settings,
+    enhance_prompt as enhance_prompt_ollama,
+    get_available_ollama_models
+)
+from backend.prompts_manager import (
+    read_system_prompt,
+    save_ollama_settings,
+    load_prompt_file,
+    save_prompt_file,
+)
+from backend.training_manager import (
+    run_training,
+    prepare_training_config,
+    run_dreambooth_from_ui_no_explicit_quantize
+)
+from backend.huggingface_manager import (
+    get_available_models,
+    download_and_save_model,
+    login_huggingface,
+    load_api_key,
+    save_api_key,
+    load_hf_api_key,
+    save_hf_api_key,
+    download_lora_model_huggingface
+)
+from backend.post_processing import (
+    update_dimensions_on_image_change,
+    update_dimensions_on_scale_change,
+    update_height_with_aspect_ratio,
+    update_width_with_aspect_ratio,
+    scale_dimensions,
+    update_guidance_visibility
+)
+
+def create_ui():
+    """
+    Create the Gradio UI interface
+    """
+    with gr.Blocks(css="""
+        .refresh-button {
+            background-color: white !important;
+            border: 1px solid #ccc !important;
+            color: black !important;
+            padding: 0px 8px !important;
+            height: 38px !important;
+            margin-left: -10px !important;
+        }
+        .refresh-button:hover {
+            background-color: #f0f0f0 !important;
+        }
+        .markdown {
+            background: none !important;
+            border: none !important;
+            padding: 0 !important;
+        }
+        .group {
+            background-color: white !important;
+            border-radius: 8px !important;
+            padding: 15px !important;
+        }
+        .white-bg {
+            background-color: white !important;
+        }
+    """) as demo:
+        with gr.Tabs():
+            with gr.TabItem("MFLUX Easy", id=0):
+                easy_mflux_components = create_easy_mflux_tab()
+                lora_files_simple = easy_mflux_components['lora_files']
+                model_simple = easy_mflux_components['model']
+
+            with gr.TabItem("Advanced Generate"):
+                advanced_generate_components = create_advanced_generate_tab()
+                lora_files = advanced_generate_components['lora_files']
+                model = advanced_generate_components['model']
+
+            with gr.TabItem("ControlNet"):
+                controlnet_components = create_controlnet_tab()
+                lora_files_cn = controlnet_components['lora_files']
+                model_cn = controlnet_components['model']
+
+            with gr.TabItem("Image-to-Image"):
+                image_to_image_components = create_image_to_image_tab()
+                lora_files_i2i = image_to_image_components['lora_files']
+                model_i2i = image_to_image_components['model']
+
+            with gr.TabItem("Dreambooth Fine-Tuning"):
+                dreambooth_components = create_dreambooth_fine_tuning_tab()
+
+            with gr.TabItem("Model & LoRA Management"):
+                model_lora_management_components = create_model_lora_management_tab(
+                    model_simple=model_simple,
+                    model=model,
+                    model_cn=model_cn,
+                    model_i2i=model_i2i,
+                    lora_files_simple=lora_files_simple,
+                    lora_files=lora_files,
+                    lora_files_cn=lora_files_cn,
+                    lora_files_i2i=lora_files_i2i
+                )
+
+        return demo
+
+if __name__ == "__main__":
+    demo = create_ui()
+    demo.queue().launch(show_error=True)

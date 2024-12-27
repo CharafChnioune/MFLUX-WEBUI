@@ -18,6 +18,7 @@ MFLUX WebUI is a comprehensive interface for the MFLUX image generation system. 
 - 🎨 **Image-to-Image Transformation** for enhancing and modifying existing images
 - 🎛️ ControlNet support for guided image generation
 - 🧠 LoRA (Low-Rank Adaptation) integration for fine-tuned models
+- 🎯 **Dreambooth Fine-Tuning** for training custom models
 - ⚙️ Model quantization options for optimized performance
 - 🌈 User-friendly UI suitable for both beginners and advanced users
 - 🔧 Customizable settings for precise control over image generation
@@ -65,13 +66,23 @@ Access the interface in your web browser at `http://localhost:7860`.
 
 ### Interface Overview
 
-The MFLUX WebUI consists of five main tabs:
+The MFLUX WebUI consists of six main tabs:
 
 1. **MFLUX Easy**: A simplified interface for quick image generation.
 2. **Advanced Generate**: Provides full control over image generation parameters.
 3. **ControlNet**: Enables guided image generation using a control image.
 4. **Image-to-Image**: Transform existing images with new prompts.
-5. **Models**: Allows for model management, including downloading, adding, and quantizing models.
+5. **Dreambooth Fine-Tuning**: Train and fine-tune your own models.
+6. **Models**: Allows for model management, including downloading, adding, and quantizing models.
+
+## Project Structure
+
+```
+frontend/
+├── components/     # UI components for each tab
+├── gradioui.py    # Main Gradio UI implementation
+└── __init__.py
+```
 
 ## Detailed Feature Guide
 
@@ -123,6 +134,15 @@ The Image-to-Image tab allows you to transform existing images using new prompts
 - **LoRA Files**: Select LoRA files to use in transformation (if available).
 - **LoRA Scale**: Adjust the influence of the LoRA files.
 - **Export Metadata**: Option to export generation parameters as JSON.
+
+### Dreambooth Fine-Tuning
+
+The Dreambooth Fine-Tuning tab allows you to train and customize models:
+
+- Train new models using your own images
+- Fine-tune existing models for specific styles or subjects
+- Customize training parameters and configurations
+- Monitor training progress
 
 ### Models
 
