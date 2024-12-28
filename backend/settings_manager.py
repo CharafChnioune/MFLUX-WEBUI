@@ -22,13 +22,13 @@ def load_llm_settings(tab_name: str = "easy") -> dict:
             tab_settings = settings.get(tab_name, {})
             
             return {
-                'llm_type': tab_settings.get('llm_type', ''),
+                'llm_type': tab_settings.get('llm_type', 'Ollama'),
                 'model': tab_settings.get('model', ''),
                 'prompt': tab_settings.get('prompt', '')
             }
             
         return {
-            'llm_type': '',
+            'llm_type': 'Ollama',
             'model': '',
             'prompt': ''
         }
@@ -36,7 +36,7 @@ def load_llm_settings(tab_name: str = "easy") -> dict:
     except Exception as e:
         print(f"Error loading LLM settings: {str(e)}")
         return {
-            'llm_type': '',
+            'llm_type': 'Ollama',
             'model': '',
             'prompt': ''
         }

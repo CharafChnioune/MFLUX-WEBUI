@@ -81,12 +81,15 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
     """
     images = []
     filenames = []
+    seeds_used = []
+    
     for i in range(num_images):
         current_seed = seed if seed is not None else int(time.time()) + i
-        output_filename = f"generated_{int(time.time())}_{i}.png"
+        seeds_used.append(current_seed)
+        output_filename = f"generated_{int(time.time())}_{i}_seed_{current_seed}.png"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-        image = flux.generate_image(
+        generated = flux.generate_image(
             seed=current_seed,
             prompt=prompt,
             config=Config(
@@ -96,10 +99,12 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
                 guidance=guidance,
             ),
         )
-        image.save(output_path)
-        images.append(image)
+        # Sla het GeneratedImage object op als PIL Image
+        generated.image.save(output_path)
+        images.append(generated.image)  # Gebruik .image attribuut voor PIL Image
         filenames.append(output_filename)
-    return images, filenames
+    
+    return images, filenames, seeds_used
 
 def clear_flux_cache():
     """
@@ -145,10 +150,7 @@ def simple_generate_image(
         width, height = parse_image_format(image_format)
         
         base_model = model.replace("-4-bit", "").replace("-8-bit", "")
-        if "schnell" in base_model:
-            steps = 4
-        else:
-            steps = 20
+        steps = 4 if "schnell" in base_model else 20
         
         flux = get_or_create_flux(
             model=model,
@@ -156,28 +158,17 @@ def simple_generate_image(
             lora_scales=lora_scales if lora_scales else None
         )
         
-        images = []
-        filenames = []
-        
-        for i in range(num_images):
-            current_seed = random.randint(0, 2**32 - 1)
-            output_filename = f"output_{int(time.time())}_{i}.png"
-            output_path = os.path.join(OUTPUT_DIR, output_filename)
-            
-            image = flux.generate_image(
-                seed=current_seed,
-                prompt=prompt,
-                config=Config(
-                    num_inference_steps=steps,
-                    height=height,
-                    width=width,
-                    guidance=7.5,
-                ),
-            )
-            
-            image.image.save(output_path)
-            images.append(image.image)
-            filenames.append(output_filename)
+        # Gebruik generate_image_batch in plaats van eigen logica
+        images, filenames, seeds = generate_image_batch(
+            flux=flux,
+            prompt=prompt,
+            seed=None,  # Random seed per image
+            steps=steps,
+            height=height,
+            width=width,
+            guidance=7.5,
+            num_images=int(num_images)
+        )
         
         del flux
         gc.collect()
@@ -187,7 +178,12 @@ def simple_generate_image(
         generation_time = end_time - start_time
         print(f"Generation time: {generation_time:.2f} seconds")
         
-        return images, "\n".join(filenames), prompt
+        # Maak informatieve output string met seeds
+        output_info = []
+        for filename, seed in zip(filenames, seeds):
+            output_info.append(f"File: {filename} (Seed: {seed})")
+        
+        return images, "\n".join(output_info), prompt
         
     except Exception as e:
         print(f"Error in image generation: {str(e)}")

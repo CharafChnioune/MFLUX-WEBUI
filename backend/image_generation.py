@@ -44,7 +44,7 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
 
     flux = get_or_create_flux(model, None, None, valid_loras, lora_scales)
 
-    images, filenames = generate_image_batch(
+    images, filenames, seeds = generate_image_batch(
         flux=flux,
         prompt=prompt,
         seed=None,      
@@ -58,7 +58,12 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
     clear_flux_cache()
     force_mlx_cleanup()
 
-    return images, "\n".join(filenames), prompt
+    # Maak een informatieve output string
+    output_info = []
+    for filename, seed in zip(filenames, seeds):
+        output_info.append(f"File: {filename} (Seed: {seed})")
+
+    return images, "\n".join(output_info), prompt
 
 def parse_image_format(image_format):
     import re
@@ -94,7 +99,7 @@ def generate_image_gradio(prompt, model, seed, width, height, steps, guidance, l
         steps_int = 4 if not steps or steps.strip() == "" else int(steps)
 
         flux = get_or_create_flux(model, None, None, valid_loras, lora_scales)
-        images, filenames = generate_image_batch(
+        images, filenames, seeds = generate_image_batch(
             flux=flux,
             prompt=prompt,
             seed=seed_int,
@@ -108,7 +113,12 @@ def generate_image_gradio(prompt, model, seed, width, height, steps, guidance, l
         clear_flux_cache()
         force_mlx_cleanup()
 
-        return images, "\n".join(filenames), prompt
+        # Maak een informatieve output string
+        output_info = []
+        for filename, seed in zip(filenames, seeds):
+            output_info.append(f"File: {filename} (Seed: {seed})")
+
+        return images, "\n".join(output_info), prompt
 
     except Exception as e:
         print(f"Error generating image: {str(e)}")
@@ -144,7 +154,7 @@ def generate_image_controlnet_gradio(prompt, control_image, model, seed, height,
         config.save_controlnet_canny = bool(save_canny)
 
         flux = get_or_create_flux(model, config, control_image, valid_loras, lora_scales)
-        images, filenames = generate_image_batch(
+        images, filenames, seeds = generate_image_batch(
             flux=flux,
             prompt=prompt,
             seed=seed_int,
@@ -158,7 +168,12 @@ def generate_image_controlnet_gradio(prompt, control_image, model, seed, height,
         clear_flux_cache()
         force_mlx_cleanup()
 
-        return images, "\n".join(filenames), prompt
+        # Maak een informatieve output string
+        output_info = []
+        for filename, seed in zip(filenames, seeds):
+            output_info.append(f"File: {filename} (Seed: {seed})")
+
+        return images, "\n".join(output_info), prompt
 
     except Exception as e:
         print(f"Error generating image: {str(e)}")
@@ -198,7 +213,7 @@ def generate_image_i2i_gradio(prompt, init_image, init_image_strength, model, se
         config.image_to_image_strength = float(init_image_strength)
 
         flux = get_or_create_flux(model, config, init_image, valid_loras, lora_scales)
-        images, filenames = generate_image_batch(
+        images, filenames, seeds = generate_image_batch(
             flux=flux,
             prompt=prompt,
             seed=seed_int,
@@ -212,7 +227,12 @@ def generate_image_i2i_gradio(prompt, init_image, init_image_strength, model, se
         clear_flux_cache()
         force_mlx_cleanup()
 
-        return images, "\n".join(filenames), prompt
+        # Maak een informatieve output string
+        output_info = []
+        for filename, seed in zip(filenames, seeds):
+            output_info.append(f"File: {filename} (Seed: {seed})")
+
+        return images, "\n".join(output_info), prompt
 
     except Exception as e:
         print(f"Error generating image: {str(e)}")

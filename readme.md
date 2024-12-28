@@ -43,7 +43,7 @@ If you prefer to install manually, follow these steps:
 
 2. Create and activate a conda environment:
    ```
-   conda create -n mflux python=3.11
+   conda create -n mflux python=3.12
    conda activate mflux
    ```
 

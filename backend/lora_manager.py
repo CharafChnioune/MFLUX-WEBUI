@@ -18,15 +18,21 @@ def get_available_lora_files():
     
     Returns:
         list: A list of tuples containing (display_name, file_path) for each .safetensors file.
-            - display_name: The filename without extension
-            - file_path: The full path to the LoRA file
     """
     lora_files = []
     for root, dirs, files in os.walk(LORA_DIR):
         for file in files:
-            if file.endswith(".safetensors"):
-                display_name = os.path.splitext(file)[0]
-                lora_files.append((display_name, os.path.join(root, file)))
+            # Filter out .link files and only include .safetensors
+            if file.endswith(".safetensors") and not file.endswith(".link"):
+                # Remove any .link extension if it somehow got appended
+                display_name = os.path.splitext(file)[0].replace(".link", "")
+                file_path = os.path.join(root, file)
+                
+                # Skip if it's a symlink
+                if not os.path.islink(file_path):
+                    lora_files.append((display_name, file_path))
+                    
+    # Sort alphabetically, case-insensitive
     lora_files.sort(key=lambda x: x[0].lower())
     return lora_files
 

@@ -127,12 +127,39 @@ def run_training(
     """
     Run the training process.
     """
-    captions = list(captions)
-    tmpdir = None
-
     try:
         yield "Starting training process...\n\n"
         
+        # Save debug config
+        debug_config = {
+            "base_model": base_model,
+            "trigger_word": trigger_word,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "lora_rank": lora_rank,
+            "output_dir": output_dir,
+            "transformer_blocks_enabled": transformer_blocks_enabled,
+            "transformer_start": transformer_start, 
+            "transformer_end": transformer_end,
+            "single_blocks_enabled": single_blocks_enabled,
+            "single_start": single_start,
+            "single_end": single_end,
+            "image_size": image_size,
+            "captions": list(captions),
+            "uploaded_files": [f.name for f in uploaded_files]
+        }
+        
+        debug_path = os.path.join(output_dir, "debug_config.json")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        with open(debug_path, "w") as f:
+            json.dump(debug_config, f, indent=2)
+            
+        yield f"[DEBUG] Saved debug config to: {debug_path}\n"
+        
+        captions = list(captions)
+        tmpdir = None
+
         yield f"[DEBUG] Input parameters:\n"
         yield f"[DEBUG] Base model: {base_model}\n"
         yield f"[DEBUG] Number of uploaded files: {len(uploaded_files)}\n"

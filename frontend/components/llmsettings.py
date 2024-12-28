@@ -11,7 +11,7 @@ from backend.settings_manager import save_llm_settings, load_llm_settings
 def create_llm_settings(tab_name="easy", parent_accordion=None):
     """Create LLM Settings UI components"""
     settings = load_llm_settings(tab_name)
-    llm_type_val = settings.get('llm_type', '')
+    llm_type_val = settings.get('llm_type', 'Ollama')
     
     with gr.Column(scale=1):
         # Model Selection Section

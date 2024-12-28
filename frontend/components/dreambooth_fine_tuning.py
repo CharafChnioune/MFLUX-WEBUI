@@ -5,6 +5,7 @@ from backend.captions import (
     fill_captions
 )
 from backend.training_manager import run_dreambooth_from_ui_no_explicit_quantize
+import os
 
 def create_dreambooth_fine_tuning_tab():
     """Create the Dreambooth Fine-Tuning tab interface"""
@@ -195,12 +196,14 @@ def create_dreambooth_fine_tuning_tab():
                     precision=0
                 )
                 
-                output_dir_txt = gr.Textbox(
-                    label="Output Directory (where to save the trained model)",
-                    value="lora",
-                    lines=1
-                )
-                
+                with gr.Row():
+                    output_dir_txt = gr.Textbox(
+                        label="Output Directory",
+                        value=os.path.expanduser("~/Desktop/mflux_training"),
+                        lines=1,
+                        interactive=True
+                    )
+
                 resume_chkpt_txt = gr.Textbox(
                     label="Resume from Checkpoint (optional)",
                     value="",
@@ -272,8 +275,29 @@ def create_dreambooth_fine_tuning_tab():
         lines=10
     )
 
+    debug_dir = gr.Textbox(
+        label="Debug Config Location", 
+        value="",
+        interactive=False
+    )
+
+    def on_start_training(*args):
+        try:
+            result = run_dreambooth_from_ui_no_explicit_quantize(*args)
+            
+            debug_path = os.path.join(args[6], "debug_config.json")
+            return {
+                training_progress: result,
+                debug_dir: f"Debug config saved to: {debug_path}"
+            }
+        except Exception as e:
+            return {
+                training_progress: f"Error: {str(e)}",
+                debug_dir: "Failed to save debug config"
+            }
+
     start_train_btn_v2.click(
-        fn=run_dreambooth_from_ui_no_explicit_quantize,
+        fn=on_start_training,
         inputs=[
             base_model_dd,
             uploaded_images,
@@ -290,11 +314,10 @@ def create_dreambooth_fine_tuning_tab():
             single_blocks_enabled,
             single_start,
             single_end,
-            image_size, 
+            image_size,
             *[pair[1] for pair in zip(image_caption_pairs[::2], image_caption_pairs[1::2])]
         ],
-        outputs=training_progress,
-        show_progress=True
+        outputs=[training_progress, debug_dir]
     )
 
     return {
