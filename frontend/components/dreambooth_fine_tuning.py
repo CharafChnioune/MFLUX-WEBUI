@@ -265,6 +265,31 @@ def create_dreambooth_fine_tuning_tab():
                     step=1
                 )
 
+                # Add event handlers to ensure only one type is enabled at a time
+                def update_blocks_visibility(transformer_enabled, single_enabled):
+                    if transformer_enabled and single_enabled:
+                        # If both are enabled, disable the one that wasn't just clicked
+                        return {
+                            transformer_blocks_enabled: True,
+                            single_blocks_enabled: False
+                        }
+                    return {
+                        transformer_blocks_enabled: transformer_enabled,
+                        single_blocks_enabled: single_enabled
+                    }
+
+                transformer_blocks_enabled.change(
+                    fn=update_blocks_visibility,
+                    inputs=[transformer_blocks_enabled, single_blocks_enabled],
+                    outputs=[transformer_blocks_enabled, single_blocks_enabled]
+                )
+
+                single_blocks_enabled.change(
+                    fn=update_blocks_visibility,
+                    inputs=[transformer_blocks_enabled, single_blocks_enabled],
+                    outputs=[transformer_blocks_enabled, single_blocks_enabled]
+                )
+
     with gr.Row():
         with gr.Column(scale=1):
             start_train_btn_v2 = gr.Button("Start Training", variant="primary", size="lg")
@@ -277,21 +302,22 @@ def create_dreambooth_fine_tuning_tab():
 
     debug_dir = gr.Textbox(
         label="Debug Config Location", 
-        value="",
+        value=os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "dreambooth_debug_config.json"),
         interactive=False
     )
 
     def on_start_training(*args):
         try:
-            result = run_dreambooth_from_ui_no_explicit_quantize(*args)
-            
-            debug_path = os.path.join(args[6], "debug_config.json")
-            return {
-                training_progress: result,
-                debug_dir: f"Debug config saved to: {debug_path}"
-            }
+            # Handle the generator properly
+            generator = run_dreambooth_from_ui_no_explicit_quantize(*args)
+            for progress in generator:
+                # Yield each progress update to show it live
+                yield {
+                    training_progress: progress,
+                    debug_dir: debug_dir.value
+                }
         except Exception as e:
-            return {
+            yield {
                 training_progress: f"Error: {str(e)}",
                 debug_dir: "Failed to save debug config"
             }
@@ -317,7 +343,8 @@ def create_dreambooth_fine_tuning_tab():
             image_size,
             *[pair[1] for pair in zip(image_caption_pairs[::2], image_caption_pairs[1::2])]
         ],
-        outputs=[training_progress, debug_dir]
+        outputs=[training_progress, debug_dir],
+        show_progress=True  # Toon de progress bar
     )
 
     return {

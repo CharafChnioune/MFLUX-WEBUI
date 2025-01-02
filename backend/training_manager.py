@@ -7,6 +7,11 @@ import threading
 import queue
 from PIL import Image
 from pathlib import Path
+import time
+
+# Create configs directory if it doesn't exist
+configs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
+os.makedirs(configs_dir, exist_ok=True)
 
 def prepare_training_config(
     base_model,
@@ -63,6 +68,7 @@ def prepare_training_config(
         }
     }
     
+    # Only add one type of transformer blocks based on what's enabled
     if transformer_blocks_enabled:
         config["lora_layers"]["transformer_blocks"] = {
             "block_range": {
@@ -77,14 +83,15 @@ def prepare_training_config(
             ],
             "lora_rank": int(lora_rank)
         }
-
-    if single_blocks_enabled:
+    elif single_blocks_enabled:
         config["lora_layers"]["single_transformer_blocks"] = {
             "block_range": {
                 "start": int(single_start),
-                "end": min(int(single_end), 20)
+                "end": min(int(single_end), 38)
             },
             "layer_types": [
+                "proj_out",
+                "proj_mlp",
                 "attn.to_q",
                 "attn.to_k",
                 "attn.to_v"
@@ -149,8 +156,8 @@ def run_training(
             "uploaded_files": [f.name for f in uploaded_files]
         }
         
-        debug_path = os.path.join(output_dir, "debug_config.json")
-        os.makedirs(output_dir, exist_ok=True)
+        # Save debug config in configs directory instead of output directory
+        debug_path = os.path.join(configs_dir, "dreambooth_debug_config.json")
         
         with open(debug_path, "w") as f:
             json.dump(debug_config, f, indent=2)
@@ -160,28 +167,27 @@ def run_training(
         captions = list(captions)
         tmpdir = None
 
-        yield f"[DEBUG] Input parameters:\n"
-        yield f"[DEBUG] Base model: {base_model}\n"
-        yield f"[DEBUG] Number of uploaded files: {len(uploaded_files)}\n"
-        yield f"[DEBUG] Trigger word: {trigger_word}\n"
-        yield f"[DEBUG] Epochs: {epochs}\n"
-        yield f"[DEBUG] Batch size: {batch_size}\n"
-        yield f"[DEBUG] LoRA rank: {lora_rank}\n"
-        yield f"[DEBUG] Output directory: {output_dir}\n"
-        yield f"[DEBUG] Resume checkpoint: {resume_checkpoint}\n"
-        yield f"[DEBUG] Image size: {image_size}\n"
-        yield f"[DEBUG] Transformer blocks enabled: {transformer_blocks_enabled}\n"
-        yield f"[DEBUG] Single blocks enabled: {single_blocks_enabled}\n"
+        yield "Input parameters:\n"
+        yield f"• Base model: {base_model}\n"
+        yield f"• Number of images: {len(uploaded_files)}\n"
+        yield f"• Trigger word: {trigger_word}\n"
+        yield f"• Epochs: {epochs}\n"
+        yield f"• Batch size: {batch_size}\n"
+        yield f"• LoRA rank: {lora_rank}\n"
+        yield f"• Output directory: {output_dir}\n"
+        yield f"• Resume checkpoint: {resume_checkpoint}\n"
+        yield f"• Image size: {image_size}\n"
+        yield f"• Transformer blocks enabled: {transformer_blocks_enabled}\n"
+        yield f"• Single blocks enabled: {single_blocks_enabled}\n\n"
         
         target_size = int(image_size.split('x')[0])
-        yield f"[DEBUG] Target size parsed: {target_size}\n"
+        yield f"Processing images to {target_size}x{target_size}...\n"
         
         tmpdir = tempfile.mkdtemp(prefix="mflux_dreambooth_")
-        yield f"[DEBUG] Created temporary directory: {tmpdir}\n"
+        yield f"Created temporary directory: {tmpdir}\n"
         
         output_dir = os.path.expanduser(output_dir)
         os.makedirs(output_dir, exist_ok=True)
-        yield f"[DEBUG] Expanded output directory: {output_dir}\n"
 
         config = prepare_training_config(
             base_model,
@@ -200,7 +206,7 @@ def run_training(
             tmpdir
         )
 
-        yield "[DEBUG] Starting image processing\n"
+        yield "\nProcessing images:\n"
         for i, (fdata, ctext) in enumerate(zip(uploaded_files, captions)):
             if not ctext:
                 continue
@@ -208,11 +214,10 @@ def run_training(
             out_fn = f"img_{i}{ext}"
             out_path = os.path.join(tmpdir, out_fn)
             
-            yield f"[DEBUG] Processing image {i+1}: {fdata.name} -> {out_fn}\n"
-            yield f"[DEBUG] Caption: {ctext}\n"
+            yield f"• Image {i+1}: {fdata.name}\n"
+            yield f"  Caption: {ctext}\n"
             
             resize_image(fdata.name, out_path, target_size)
-            yield f"[DEBUG] Resized and saved image to: {out_path}\n"
 
             config["examples"]["images"].append({
                 "image": out_fn,
@@ -222,9 +227,9 @@ def run_training(
         config_path = os.path.join(tmpdir, "config.json")
         project_config_path = os.path.join(os.getcwd(), "last_training_config.json")
         
-        yield f"[DEBUG] Saving config to:\n"
-        yield f"[DEBUG] - Temp path: {config_path}\n"
-        yield f"[DEBUG] - Project path: {project_config_path}\n"
+        yield "\nSaving configs:\n"
+        yield f"• Temp config: {config_path}\n"
+        yield f"• Project config: {project_config_path}\n"
         
         for save_path in [config_path, project_config_path]:
             with open(save_path, "w") as f:
@@ -253,7 +258,7 @@ def run_training(
         if resume_checkpoint:
             train_cmd.extend(["--resume-checkpoint", resume_checkpoint])
 
-        yield f"[DEBUG] Executing training command: {' '.join(train_cmd)}\n"
+        yield f"\nStarting training with command:\n{' '.join(train_cmd)}\n\n"
         
         process = subprocess.Popen(
             train_cmd,
@@ -277,13 +282,30 @@ def run_training(
         stdout_thread.start()
         stderr_thread.start()
 
+        # Buffer voor de output
+        output_buffer = ""
+        last_yield_time = time.time()
+        
         while process.poll() is None:
             try:
                 line = output_queue.get_nowait()
-                yield line
+                output_buffer += line
+                
+                # Yield elke seconde of als de buffer groot genoeg is
+                current_time = time.time()
+                if current_time - last_yield_time > 1.0 or len(output_buffer) > 500:
+                    yield output_buffer
+                    output_buffer = ""
+                    last_yield_time = current_time
+                    
             except queue.Empty:
+                if output_buffer:  # Als er nog iets in de buffer zit
+                    yield output_buffer
+                    output_buffer = ""
+                time.sleep(0.1)  # Voorkom CPU spinning
                 continue
 
+        # Verzamel overgebleven output
         remaining_output = []
         while True:
             try:
@@ -292,13 +314,13 @@ def run_training(
             except queue.Empty:
                 break
 
-        for line in remaining_output:
-            yield line
+        if remaining_output:
+            yield "".join(remaining_output)
 
         if process.returncode != 0:
-            yield f"[ERROR] Training process exited with code {process.returncode}\n"
+            yield f"\n❌ Training process failed with code {process.returncode}\n"
         else:
-            yield "[SUCCESS] Training completed successfully\n"
+            yield "\n✅ Training completed successfully!\n"
 
     except Exception as e:
         error_details = f"Error during training: {str(e)}\n"
@@ -309,9 +331,9 @@ def run_training(
             try:
                 import shutil
                 shutil.rmtree(tmpdir)
-                yield f"[DEBUG] Cleaned up temporary directory: {tmpdir}\n"
+                yield f"\nCleaned up temporary directory: {tmpdir}\n"
             except Exception as e:
-                yield f"[WARNING] Failed to clean up temporary directory: {str(e)}\n"
+                yield f"\nWarning: Failed to clean up temporary directory: {str(e)}\n"
 
 def run_dreambooth_from_ui_no_explicit_quantize(*args, **kwargs):
     """
@@ -320,6 +342,34 @@ def run_dreambooth_from_ui_no_explicit_quantize(*args, **kwargs):
     """
     progress_text = ""
     try:
+        # Save debug config first to ensure it's always saved
+        debug_config = {
+            "base_model": args[0],
+            "trigger_word": args[2],
+            "epochs": args[3],
+            "batch_size": args[4],
+            "lora_rank": args[5],
+            "output_dir": args[6],
+            "transformer_blocks_enabled": args[9],
+            "transformer_start": args[10], 
+            "transformer_end": args[11],
+            "single_blocks_enabled": args[12],
+            "single_start": args[13],
+            "single_end": args[14],
+            "image_size": args[15],
+            "captions": list(args[16:]),
+            "uploaded_files": [f.name for f in args[1]]
+        }
+        
+        debug_path = os.path.join(configs_dir, "dreambooth_debug_config.json")
+        os.makedirs(configs_dir, exist_ok=True)
+        
+        with open(debug_path, "w") as f:
+            json.dump(debug_config, f, indent=2)
+        
+        progress_text += f"[DEBUG] Saved debug config to: {debug_path}\n"
+        
+        # Now run the training process
         for progress in run_training(*args, **kwargs):
             progress_text += progress
             yield progress_text
