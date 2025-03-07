@@ -85,43 +85,35 @@ def download_and_save_model(
     hf_model_name, alias, num_train_steps, max_sequence_length, api_key
 ):
     try:
-        login_result = login_huggingface(api_key)
-        if "Error" in login_result:
-            return gr.update(), gr.update(), gr.update(), gr.update(), login_result
-
+        # Create a directory for the model if it doesn't exist
         model_dir = os.path.join(MODELS_DIR, alias)
         os.makedirs(model_dir, exist_ok=True)
 
-        downloaded_files = snapshot_download(
-            repo_id=hf_model_name, local_dir=model_dir, use_auth_token=api_key
-        )
-
-        new_config = CustomModelConfig(
-            hf_model_name, alias, num_train_steps, max_sequence_length
-        )
-        get_custom_model_config.__globals__["models"][alias] = new_config
-
-        print(f"Model {hf_model_name} successfully downloaded and saved as {alias}")
-
-        updated_models = get_updated_models()
-        return (
-            gr.update(choices=updated_models),
-            gr.update(choices=updated_models),
-            gr.update(choices=updated_models),
-            gr.update(
-                choices=[
-                    m
-                    for m in updated_models
-                    if not m.endswith("-4-bit") and not m.endswith("-8-bit")
-                ]
+        # Use snapshot_download with the token argument
+        snapshot_download(
+            repo_id=hf_model_name,
+            local_dir=model_dir,
+            token=api_key,  # Pass the token here
+            ignore_patterns=(
+                ["*.bin", "*.safetensors"] if "." in hf_model_name else None
             ),
-            f"Model {hf_model_name} successfully downloaded and saved as {alias}",
         )
 
+        # Create or update the model config file
+        config_path = os.path.join(model_dir, "config.json")
+        config_data = {
+            "model_name": hf_model_name,
+            "alias": alias,
+            "num_train_steps": num_train_steps,
+            "max_sequence_length": max_sequence_length,
+        }
+
+        with open(config_path, "w") as f:
+            json.dump(config_data, f)
+
+        return f"Successfully downloaded model: {alias}"
     except Exception as e:
-        error_message = f"Error downloading model: {str(e)}"
-        print(f"Error: {error_message}")
-        return gr.update(), gr.update(), gr.update(), gr.update(), error_message
+        return f"Error downloading model: {str(e)}"
 
 
 def get_or_create_flux(
