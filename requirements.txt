@@ -1,4 +1,4 @@
-mflux==0.6.0
+mflux==0.6.2
 gradio==5.20.0
 ollama==0.4.7
 requests==2.32.3

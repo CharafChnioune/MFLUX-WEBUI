@@ -126,7 +126,7 @@ def create_ui():
                 advanced_generate_components = create_advanced_generate_tab()
                 lora_files = advanced_generate_components['lora_files']
                 model = advanced_generate_components['model']
-
+                
             with gr.TabItem("ControlNet"):
                 controlnet_components = create_controlnet_tab()
                 lora_files_cn = controlnet_components['lora_files']

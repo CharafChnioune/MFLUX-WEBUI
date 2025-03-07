@@ -108,12 +108,17 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
     filenames = []
     seeds_used = []
     
+    # Zorg dat de output directory bestaat
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
     for i in range(num_images):
         current_seed = seed if seed is not None else int(time.time()) + i
         seeds_used.append(current_seed)
         output_filename = f"generated_{int(time.time())}_{i}_seed_{current_seed}.png"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
+        abs_output_path = os.path.abspath(output_path)
 
+        print(f"Generating image {i+1}/{num_images} with seed {current_seed}")
         generated = flux.generate_image(
             seed=current_seed,
             prompt=prompt,
@@ -126,8 +131,9 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
         )
         # Sla het GeneratedImage object op als PIL Image
         generated.image.save(output_path)
+        print(f"Image saved to: {abs_output_path}")
         images.append(generated.image)  # Gebruik .image attribuut voor PIL Image
-        filenames.append(output_filename)
+        filenames.append(abs_output_path)  # Gebruik absolute paden
     
     return images, filenames, seeds_used
 
