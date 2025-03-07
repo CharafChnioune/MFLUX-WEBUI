@@ -261,7 +261,7 @@ def generate_image_batch(
         output_filename = f"generated_{int(time.time())}_{i}.png"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-        image = flux.generate_image(
+        generated = flux.generate_image(
             seed=current_seed,
             prompt=prompt,
             config=Config(
@@ -271,7 +271,15 @@ def generate_image_batch(
                 guidance=guidance,
             ),
         )
-        image.save(output_path)
+
+        # Make sure we're storing the PIL Image, not the GeneratedImage object
+        if hasattr(generated, "image"):
+            image = generated.image
+            generated.image.save(output_path)
+        else:
+            image = generated
+            image.save(output_path)
+
         images.append(image)
         filenames.append(output_filename)
     return images, filenames
@@ -289,9 +297,13 @@ def generate_image_gradio(
     metadata,
     ollama_model,
     system_prompt,
-    lora_scales_list,
-    num_images,
+    *lora_scales_and_num_images,
 ):
+    # Extract num_images from the end of the variable arguments
+    num_images = lora_scales_and_num_images[-1]
+    # Extract lora_scales from the beginning of the variable arguments
+    lora_scales_list = lora_scales_and_num_images[:-1]
+
     print(f"\n--- Generating image (Advanced) ---")
     print(f"Model: {model}")
     print(f"Prompt: {prompt}")
@@ -339,8 +351,16 @@ def generate_image_gradio(
         generation_time = end_time - start_time
         print(f"Generation time: {generation_time:.2f} seconds")
 
+        # Extract the PIL Image from each GeneratedImage object if needed
+        processed_images = []
+        for img in images:
+            if hasattr(img, "image"):  # If it's a GeneratedImage object
+                processed_images.append(img.image)
+            else:  # It's already a PIL Image
+                processed_images.append(img)
+
         # Return gallery of images, filenames, and prompt
-        return images, "\n".join(filenames), prompt
+        return processed_images, "\n".join(filenames), prompt
 
     except Exception as e:
         print(f"Error generating image: {str(e)}")
