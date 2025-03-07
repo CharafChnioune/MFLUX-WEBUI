@@ -180,7 +180,7 @@ def create_dreambooth_fine_tuning_tab():
 
                 epochs_txt = gr.Number(
                     label="Epochs (number of training iterations)",
-                    value=10,
+                    value=20,
                     precision=0
                 )
                 
@@ -194,6 +194,49 @@ def create_dreambooth_fine_tuning_tab():
                     label="LoRA Rank (higher = stronger effect but larger file)",
                     value=4,
                     precision=0
+                )
+                
+                learning_rate_dd = gr.Dropdown(
+                    choices=["0.0001", "0.00005", "0.0002"],
+                    label="Learning Rate",
+                    value="0.0001",
+                    info="Lower value = more stable but slower, higher value = faster but less stable"
+                )
+                
+                seed_txt = gr.Number(
+                    label="Random Seed",
+                    value=42,
+                    precision=0,
+                    info="Set a specific seed for reproducible results"
+                )
+                
+                checkpoint_freq_txt = gr.Number(
+                    label="Checkpoint Frequency",
+                    value=10,
+                    precision=0,
+                    info="Save a checkpoint every N steps"
+                )
+                
+                validation_prompt_txt = gr.Textbox(
+                    label="Validation Prompt",
+                    value="",
+                    placeholder="Leave empty to use the trigger word",
+                    info="Used to generate validation images during training"
+                )
+                
+                guidance_scale_slider = gr.Slider(
+                    label="Guidance Scale",
+                    minimum=1.0,
+                    maximum=10.0,
+                    value=3.0,
+                    step=0.1,
+                    info="Controls how closely the model follows the prompt (higher = more prompt adherence)"
+                )
+                
+                low_ram_mode = gr.Checkbox(
+                    label="Low RAM Mode",
+                    value=True,
+                    info="Enable for systems with limited RAM. May slow down training but prevents crashes"
                 )
                 
                 with gr.Row():
@@ -331,6 +374,12 @@ def create_dreambooth_fine_tuning_tab():
             epochs_txt,
             batch_size_txt,
             lora_rank_txt,
+            learning_rate_dd,
+            seed_txt,
+            checkpoint_freq_txt,
+            validation_prompt_txt,
+            guidance_scale_slider,
+            low_ram_mode,
             output_dir_txt,
             resume_chkpt_txt,
             mlx_vlm_model,
