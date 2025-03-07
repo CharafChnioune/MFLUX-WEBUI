@@ -245,7 +245,8 @@ def run_training(
             raise ValueError(f"Images directory not found: {config['examples']['path']}")
 
         train_cmd = [
-            "mflux-train",
+            "python",
+            os.path.join(os.path.dirname(__file__), 'custom_train.py'),
             "--train-config",
             config_path,
             "--model",
@@ -254,6 +255,37 @@ def run_training(
         
         if config["quantize"]:
             train_cmd.extend(["--quantize", str(config["quantize"])])
+        
+        # Add env variable to skip huggingface hub authentication by setting the token to be empty
+        os.environ["HF_TOKEN"] = ""
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = ""
+            
+        # Voeg low-ram optie toe indien nodig
+        train_cmd.append("--low-ram")
+        
+        # Gebruik lokaal model pad indien beschikbaar
+        if "dev" in base_model:
+            model_name = "AITRADER/MFLUXUI.1-dev"
+        else:
+            model_name = "AITRADER/MFLUXUI.1-schnell"
+            
+        # Zoek in de Hugging Face cache naar een geschikt model
+        local_model_path = os.path.expanduser(f"~/.cache/huggingface/hub/models--{model_name.replace('/', '--')}/snapshots")
+        
+        if os.path.exists(local_model_path):
+            # Get the most recent snapshot directory
+            snapshot_dirs = [d for d in os.listdir(local_model_path) if os.path.isdir(os.path.join(local_model_path, d))]
+            if snapshot_dirs:
+                # Sort by name to get the most recent snapshot (assuming hash-based naming)
+                snapshot_dir = sorted(snapshot_dirs)[-1]
+                full_path = os.path.join(local_model_path, snapshot_dir)
+                train_cmd.extend(["--path", full_path])
+                yield f"Using local model path: {full_path}\n"
+            else:
+                yield f"No snapshot directories found in {local_model_path}\n"
+        else:
+            yield f"Local model path not found: {local_model_path}\n"
+            yield "Using preloaded models from environment\n"
         
         if resume_checkpoint:
             train_cmd.extend(["--resume-checkpoint", resume_checkpoint])

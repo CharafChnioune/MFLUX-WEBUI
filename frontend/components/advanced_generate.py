@@ -1,5 +1,5 @@
 import gradio as gr
-from backend.model_manager import get_updated_models
+from backend.model_manager import get_updated_models, update_guidance_visibility
 from backend.lora_manager import (
     get_lora_choices,
     update_lora_scales,
@@ -56,9 +56,30 @@ def create_advanced_generate_tab():
                     return "20"
                 return ""
             
-            steps = gr.Textbox(label="Inference Steps (optional)", value="4")
-            model.change(fn=update_steps_based_on_model, inputs=[model], outputs=[steps])
+            # Stel de standaard waardes in op basis van het standaard model
+            default_model = "schnell-4-bit"
+            steps = gr.Textbox(
+                label="Inference Steps (optional)", 
+                value=update_steps_based_on_model(default_model)
+            )
             
+            # Voeg guidance toe net onder steps
+            guidance = gr.Number(
+                label=update_guidance_visibility(default_model)["label"],
+                value=3.5, 
+                visible=True
+            )
+            
+            # Update beide steps en guidance op basis van het model
+            model.change(
+                fn=lambda model_name: [
+                    update_steps_based_on_model(model_name),
+                    update_guidance_visibility(model_name)
+                ],
+                inputs=[model],
+                outputs=[steps, guidance]
+            )
+
             with gr.Row():
                 seed = gr.Textbox(
                     label="Seed (optional)", 
@@ -106,10 +127,17 @@ def create_advanced_generate_tab():
                 outputs=lora_scales
             )
 
-            num_images = gr.Number(label="Number of Images", value=1, precision=0)
+            # Options for generating multiple images
+            with gr.Row():
+                num_images = gr.Number(label="Number of Images", value=1, precision=0)
+                auto_seeds = gr.Checkbox(label="Auto-generate random seeds", value=False)
             
-            guidance = gr.Number(label="Guidance Scale", value=3.5, visible=False)
-            metadata = gr.Checkbox(label="Export Metadata as JSON", value=False)
+            # Additional options
+            with gr.Accordion("Additional Options", open=False):
+                with gr.Row():
+                    metadata = gr.Checkbox(label="Export Metadata as JSON", value=False)
+                    low_ram = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
+                    
             generate_button = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -125,7 +153,7 @@ def create_advanced_generate_tab():
             output_filename = gr.Textbox(label="Saved Image Filenames")
 
         def generate_with_loras(*args):
-            prompt, model, seed, width, height, steps, guidance, lora_files, metadata, llm_type, llm_model, *lora_scales_and_num = args
+            prompt, model, seed, width, height, steps, guidance, lora_files, metadata, low_ram, auto_seeds, llm_type, llm_model, *lora_scales_and_num = args
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -134,6 +162,9 @@ def create_advanced_generate_tab():
                 valid_scales = lora_scales[:len(valid_loras)]
             else:
                 valid_scales = []
+            
+            # Convert auto_seeds to number or None
+            auto_seeds_value = 8 if auto_seeds else None
             
             return generate_image_gradio(
                 prompt,
@@ -148,14 +179,16 @@ def create_advanced_generate_tab():
                 llm_model if llm_type == "Ollama" else None,
                 None,
                 *valid_scales,
-                num_images=num_images
+                num_images=num_images,
+                low_ram=low_ram,
+                auto_seeds=auto_seeds_value
             )
 
         generate_button.click(
             fn=generate_with_loras,
             inputs=[
                 prompt_advanced, model, seed, width, height, steps, guidance, lora_files,
-                metadata, llm_components_advanced[0], llm_components_advanced[1],
+                metadata, low_ram, auto_seeds, llm_components_advanced[0], llm_components_advanced[1],
                 *lora_scales, num_images
             ],
             outputs=[output_gallery, output_filename, prompt_advanced]

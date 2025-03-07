@@ -5,7 +5,8 @@ from backend.lora_manager import (
     get_lora_choices,
     update_lora_scales,
     MAX_LORAS,
-    process_lora_files
+    process_lora_files,
+    refresh_lora_choices
 )
 from backend.prompts_manager import enhance_prompt
 from backend.flux_manager import (
@@ -114,7 +115,7 @@ def create_image_to_image_tab():
             )
 
             guidance_i2i = gr.Number(label="Guidance Scale", value=3.5, visible=False)
-            strength_i2i = gr.Number(label="Strength", value=0.5)
+            image_strength = gr.Number(label="Image Strength", value=0.5)
             
             steps_i2i = gr.Textbox(label="Inference Steps (optional)", value="4")
             model_i2i.change(fn=update_steps_based_on_model, inputs=[model_i2i], outputs=[steps_i2i])
@@ -154,6 +155,20 @@ def create_image_to_image_tab():
                     min_width=30,
                     elem_classes='refresh-button'
                 )
+                
+                # Koppel de refresh knop aan de refresh_lora_choices functie
+                refresh_lora_i2i.click(
+                    fn=refresh_lora_choices,
+                    inputs=[],
+                    outputs=[lora_files_i2i]
+                )
+                
+                # Auto refresh bij openen van dropdown
+                lora_files_i2i.select(
+                    fn=refresh_lora_choices,
+                    inputs=[],
+                    outputs=[lora_files_i2i]
+                )
 
             lora_scales_i2i = [
                 gr.Slider(minimum=0.0, maximum=2.0, step=0.01, label="Scale:", visible=False, value=1.0) 
@@ -169,6 +184,7 @@ def create_image_to_image_tab():
             num_images_i2i = gr.Number(label="Number of Images", value=1, precision=0)
 
             metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
+            low_ram_i2i = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
             generate_button_i2i = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -184,7 +200,7 @@ def create_image_to_image_tab():
             output_message_i2i = gr.Textbox(label="Saved Image Filenames")
 
         def generate_with_loras(*args):
-            prompt, input_image, model, seed, height, width, steps, guidance, strength, lora_files, metadata, *lora_scales_and_num = args
+            prompt, input_image, model, seed, height, width, steps, guidance, image_strength, lora_files, metadata, low_ram, *lora_scales_and_num = args
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -206,21 +222,30 @@ def create_image_to_image_tab():
                 width,
                 steps,
                 guidance,
-                strength,
+                image_strength,
                 valid_loras,
                 metadata,
                 *valid_scales,
-                num_images=num_images
+                num_images=num_images,
+                low_ram=low_ram
             )
 
         generate_button_i2i.click(
             fn=generate_with_loras,
             inputs=[
                 prompt, input_image, model_i2i, seed_i2i, height_i2i, width_i2i, steps_i2i,
-                guidance_i2i, strength_i2i, lora_files_i2i, metadata_i2i,
+                guidance_i2i, image_strength, lora_files_i2i, metadata_i2i, low_ram_i2i,
                 *lora_scales_i2i, num_images_i2i
             ],
             outputs=[output_gallery_i2i, output_message_i2i, prompt]
+        )
+        
+        # We gebruiken geen gr.Chatbot.every omdat dit niet bestaat
+        # In plaats daarvan refreshen we de dropdown bij elke generatie
+        generate_button_i2i.click(
+            fn=refresh_lora_choices,
+            inputs=[],
+            outputs=[lora_files_i2i]
         )
 
         return {

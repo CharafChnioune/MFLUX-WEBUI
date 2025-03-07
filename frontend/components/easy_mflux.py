@@ -77,7 +77,9 @@ def create_easy_mflux_tab():
                 outputs=lora_scales_simple
             )
 
-            num_images_simple = gr.Number(label="Number of Images", value=1, precision=0)
+            with gr.Row():
+                num_images_simple = gr.Number(label="Number of Images", value=1, precision=0)
+                low_ram_simple = gr.Checkbox(label="Low RAM Mode", value=False)
 
             generate_button_simple = gr.Button("Generate Image", variant='primary')
         
@@ -106,7 +108,7 @@ def create_easy_mflux_tab():
         )
         
         def generate_with_loras(*args):
-            prompt, model, image_format, lora_files, llm_type, llm_model, system_prompt, *lora_scales_and_num = args
+            prompt, model, image_format, lora_files, llm_type, llm_model, system_prompt, low_ram, *lora_scales_and_num = args
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -127,7 +129,8 @@ def create_easy_mflux_tab():
                 llm_model if llm_type == "Ollama" else None,
                 system_prompt,
                 *valid_scales,
-                num_images=num_images
+                num_images=num_images,
+                low_ram=low_ram
             )
         
         generate_button_simple.click(
@@ -140,6 +143,7 @@ def create_easy_mflux_tab():
                 llm_components_simple[0],  # llm_type
                 llm_components_simple[1] if llm_components_simple[0] == "Ollama" else llm_components_simple[4],  # correct model based on type
                 llm_components_simple[2],  # system_prompt
+                low_ram_simple,
                 *lora_scales_simple,
                 num_images_simple
             ],

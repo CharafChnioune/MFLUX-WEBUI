@@ -1,8 +1,8 @@
-mflux==0.5.1
-gradio==5.9.1
-ollama==0.4.4
+mflux==0.6.0
+gradio==5.20.0
+ollama==0.4.7
 requests==2.32.3
-beautifulsoup4==4.12.3
-mlx-vlm==0.1.6
-mlx-lm==0.20.5
+beautifulsoup4==4.13.3
+mlx-vlm==0.1.16
+mlx-lm==0.21.5
 peft==0.14.0

@@ -20,7 +20,7 @@ from backend.lora_manager import (
 )
 from backend.civitai_manager import download_lora_model
 
-def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, lora_files_simple, lora_files, lora_files_cn, lora_files_i2i):
+def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, model_icl, lora_files_simple, lora_files, lora_files_cn, lora_files_i2i, lora_files_icl):
     """Create the Model & LoRA Management tab interface"""
     
     # Centrale API Key Settings
@@ -87,33 +87,39 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, l
     def download_lora(model_url_or_name, api_key_civitai, api_key_hf, lora_source):
         try:
             if lora_source == "CivitAI":
-                lora_files_simple, lora_files, lora_files_cn, status = download_lora_model(model_url_or_name, api_key_civitai)
+                lora_files_simple, lora_files, lora_files_cn, lora_files_i2i, lora_files_icl, status = download_lora_model(model_url_or_name, api_key_civitai)
             elif lora_source == "HuggingFace":
                 status = download_lora_model_huggingface(model_url_or_name, api_key_hf)
                 if "Error" not in status:
                     lora_files_simple = get_lora_choices()
                     lora_files = lora_files_simple
                     lora_files_cn = lora_files_simple
+                    lora_files_i2i = lora_files_simple
+                    lora_files_icl = lora_files_simple
                 else:
                     lora_files_simple = None
                     lora_files = None
                     lora_files_cn = None
+                    lora_files_i2i = None
+                    lora_files_icl = None
             else:
-                return None, None, None, "Error: Invalid LoRA source selected"
+                return None, None, None, None, None, "Error: Invalid LoRA source selected"
 
             return (
                 gr.update(choices=lora_files_simple) if lora_files_simple else gr.update(),
                 gr.update(choices=lora_files) if lora_files else gr.update(),
                 gr.update(choices=lora_files_cn) if lora_files_cn else gr.update(),
+                gr.update(choices=lora_files_i2i) if lora_files_i2i else gr.update(),
+                gr.update(choices=lora_files_icl) if lora_files_icl else gr.update(),
                 status
             )
         except Exception as e:
-            return gr.update(), gr.update(), gr.update(), f"Error: {str(e)}"
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: {str(e)}"
 
     download_lora_button.click(
         fn=download_lora,
         inputs=[lora_input, civitai_api_key, hf_api_key, lora_source],
-        outputs=[lora_files_simple, lora_files, lora_files_cn, lora_download_status]
+        outputs=[lora_files_simple, lora_files, lora_files_cn, lora_files_i2i, lora_files_icl, lora_download_status]
     )
 
     gr.Markdown("## Download and Add Model")
@@ -121,6 +127,11 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, l
         with gr.Column(scale=2):
             hf_model_name = gr.Textbox(label="Hugging Face Model Name")
             alias = gr.Textbox(label="Model Alias")
+            base_arch = gr.Radio(
+                choices=["schnell", "dev"],
+                label="Base Architecture (for Third-Party models)",
+                value="schnell"
+            )
             num_train_steps = gr.Number(label="Number of Training Steps", value=1000)
             max_sequence_length = gr.Number(label="Max Sequence Length", value=512)
         with gr.Column(scale=1):
@@ -131,11 +142,16 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, l
     with gr.Row():
         with gr.Column(scale=2):
             model_quant = gr.Dropdown(
-                choices=[m for m in get_updated_models() if not m.endswith("-4-bit") and not m.endswith("-8-bit")],
+                choices=[m for m in get_updated_models() 
+                        if not any(m.endswith(f"-{bits}-bit") for bits in ["3", "4", "6", "8"])],
                 label="Model to Quantize",
                 value="dev"
             )
-            quantize_level = gr.Radio(choices=["4", "8"], label="Quantize Level", value="8")
+            quantize_level = gr.Radio(
+                choices=["3", "4", "6", "8"], 
+                label="Quantize Level", 
+                value="8"
+            )
         with gr.Column(scale=1):
             save_button = gr.Button("Save Quantized Model", variant='primary')
             save_output = gr.Textbox(label="Quantization Output", lines=3)
@@ -197,14 +213,14 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, l
 
     download_button.click(
         fn=download_and_save_model,
-        inputs=[hf_model_name, alias, num_train_steps, max_sequence_length, hf_api_key],
-        outputs=[model_simple, model, model_cn, model_i2i, download_output]
+        inputs=[hf_model_name, alias, num_train_steps, max_sequence_length, hf_api_key, base_arch],
+        outputs=[model_simple, model, model_cn, model_i2i, model_icl, download_output]
     )
 
     save_button.click(
         fn=save_quantized_model_gradio,
         inputs=[model_quant, quantize_level],
-        outputs=[model_simple, model, model_cn, model_i2i, model_quant, save_output]
+        outputs=[model_simple, model, model_cn, model_i2i, model_icl, model_quant, save_output]
     )
 
     return {

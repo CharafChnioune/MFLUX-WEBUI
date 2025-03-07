@@ -22,6 +22,8 @@ from backend.post_processing import (
     scale_dimensions
 )
 from frontend.components.llmsettings import create_llm_settings
+import time
+import os
 
 def update_dimensions_on_image_change(image):
     """Update width and height when image is uploaded"""
@@ -92,7 +94,8 @@ def create_controlnet_tab():
                 value="schnell-4-bit"
             )
 
-            canny_image = gr.Image(label="Canny Image", type="pil", visible=False)
+            # Vervang de canny image door een tekstmelding die alleen zichtbaar is als save_canny is ingeschakeld
+            canny_notification = gr.Textbox(label="Canny Edge Detection", visible=False)
 
             # Store original dimensions
             original_width_cn = gr.State()
@@ -188,6 +191,7 @@ def create_controlnet_tab():
 
             metadata_cn = gr.Checkbox(label="Export Metadata as JSON", value=False)
             save_canny = gr.Checkbox(label="Save Canny Edge Detection Image", value=False)
+            low_ram_cn = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
             generate_button_cn = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -201,10 +205,9 @@ def create_controlnet_tab():
                 height="auto"
             )
             output_message_cn = gr.Textbox(label="Saved Image Filenames")
-            canny_image = gr.Image(label="Canny Image", visible=False)
 
         def generate_with_loras(*args):
-            prompt, control_image, model, seed, height, width, steps, guidance, controlnet_strength, lora_files, metadata, save_canny, *lora_scales_and_num = args
+            prompt, control_image, model, seed, height, width, steps, guidance, controlnet_strength, lora_files, metadata, save_canny, low_ram, *lora_scales_and_num = args
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -231,25 +234,42 @@ def create_controlnet_tab():
                 metadata,
                 save_canny,
                 *valid_scales,
-                num_images=num_images
+                num_images=num_images,
+                low_ram=low_ram
             )
+            
+            # Update canny image visibility based on save_canny checkbox
+            # Controlnet retourneert nu [images], filename, prompt 
+            # zonder expliciet het canny image terug te geven
+            # daarom maken we een afbeelding in het geval save_canny ingeschakeld is
+            if save_canny and len(result[0]) > 0:
+                # Als er controlnet is gebruikt, toon een melding dat de canny-afbeelding apart is opgeslagen
+                timestamp = int(time.time())
+                canny_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output", f"canny_{timestamp}_{seed}.png")
+                canny_notification = f"Canny edge image opgeslagen in output map als 'canny_{timestamp}_{seed}.png'"
+                # Zet de zichtbaarheid van het textvak direct in
+                canny_notification = gr.update(value=canny_notification, visible=True)
+            else:
+                # Verberg het textvak en maak het leeg
+                canny_notification = gr.update(value="", visible=False)
             
             # Return results
             return (
-                result[0],  # Generated images
-                result[1],  # Filenames
-                result[2],  # Original prompt
-                result[3]   # Canny image
+                result[0],             # Generated images
+                result[1],             # Filenames
+                result[2],             # Original prompt
+                canny_notification     # Bericht over canny image
             )
 
         generate_button_cn.click(
             fn=generate_with_loras,
             inputs=[
-                prompt, control_image, model_cn, seed_cn, height_cn, width_cn, steps_cn,
-                guidance_cn, controlnet_strength, lora_files_cn, metadata_cn, save_canny,
+                prompt, control_image, model_cn, seed_cn, height_cn, width_cn, 
+                steps_cn, guidance_cn, controlnet_strength, lora_files_cn, 
+                metadata_cn, save_canny, low_ram_cn,
                 *lora_scales_cn, num_images_cn
             ],
-            outputs=[output_gallery_cn, output_message_cn, prompt, canny_image]
+            outputs=[output_gallery_cn, output_message_cn, prompt, canny_notification]
         )
 
         return {
@@ -260,5 +280,5 @@ def create_controlnet_tab():
             'output_message': output_message_cn,
             'ollama_components': llm_components,
             'control_image': control_image,
-            'canny_image': canny_image
+            'canny_notification': canny_notification
         } 

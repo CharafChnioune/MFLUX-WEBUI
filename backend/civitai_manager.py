@@ -7,11 +7,12 @@ import gradio as gr
 
 def slugify(value):
     """
-    Convert a string to a URL-friendly slug.
+    Slugify a string by removing special characters and replacing whitespace with hyphens.
     """
-    value = str(value)
-    value = re.sub('[^\w\s-]', '', value).strip().lower()
-    value = re.sub('[-\s]+', '-', value)
+    # Remove special characters
+    value = re.sub(r'[^\w\s-]', '', value).strip().lower()
+    # Replace whitespace with hyphens
+    value = re.sub(r'[-\s]+', '-', value)
     return value
 
 def get_updated_lora_files():
@@ -27,13 +28,13 @@ def download_lora_model(page_url, api_key):
     Download a LoRA model from CivitAI.
     """
     if not api_key:
-        return gr.update(), gr.update(), gr.update(), "Error: API key is missing"
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: API key is missing"
 
     try:
         print(f"Starting download process for URL: {page_url}")
         model_id_match = re.search(r'/models/(\d+)', page_url)
         if not model_id_match:
-            return gr.update(), gr.update(), gr.update(), f"Error: Could not extract model ID from the URL: {page_url}"
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: Could not extract model ID from the URL: {page_url}"
 
         model_id = model_id_match.group(1)
         api_url = f"https://civitai.com/api/v1/models/{model_id}"
@@ -45,55 +46,59 @@ def download_lora_model(page_url, api_key):
         response = requests.get(api_url, headers=headers)
         
         if response.status_code != 200:
-            return gr.update(), gr.update(), gr.update(), f"Error: API request failed with status {response.status_code}"
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: API request failed with status {response.status_code}"
         
         model_data = response.json()
-        model_name = model_data.get('name', 'unknown_model')
-        model_name = slugify(model_name)
+        model_name = model_data.get("name", "unknown_model")
+        model_version_id = model_data.get("modelVersions", [{}])[0].get("id")
         
-        version = model_data.get('modelVersions', [{}])[0]
-        files = version.get('files', [])
+        if not model_version_id:
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No model version found"
         
-        if not files:
-            return gr.update(), gr.update(), gr.update(), "Error: No files found for this model"
+        # Download model files
+        download_url = f"https://civitai.com/api/v1/model-versions/{model_version_id}/files"
+        response = requests.get(download_url, headers=headers)
         
-        safetensor_files = [f for f in files if f['name'].endswith('.safetensors')]
-        if not safetensor_files:
-            return gr.update(), gr.update(), gr.update(), "Error: No .safetensors files found"
+        if response.status_code != 200:
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: Failed to get download links, status: {response.status_code}"
         
-        os.makedirs("lora", exist_ok=True)
+        files_data = response.json()
         
-        for file in safetensor_files:
-            download_url = file.get('downloadUrl')
-            if not download_url:
-                print(f"Warning: No download URL for file {file.get('name')}")
+        # Ensure lora directory exists
+        lora_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lora")
+        os.makedirs(lora_dir, exist_ok=True)
+        
+        for file_info in files_data:
+            file_name = file_info.get("name")
+            if not file_name:
                 continue
                 
-            filename = os.path.join("lora", file['name'])
-            print(f"Downloading {download_url} to {filename}")
+            download_url = file_info.get("downloadUrl")
+            if not download_url:
+                print(f"Warning: No download URL for file {file_name}")
+                continue
+                
+            file_path = os.path.join(lora_dir, file_name)
+            response = requests.get(download_url, headers=headers, stream=True)
             
-            download_response = requests.get(download_url, headers=headers, stream=True)
-            if download_response.status_code != 200:
-                return gr.update(), gr.update(), gr.update(), f"Error downloading file: {download_response.status_code}"
-            
-            with open(filename, 'wb') as f:
-                for chunk in download_response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            
-            print(f"Successfully downloaded {filename}")
+            if response.status_code != 200:
+                print(f"Warning: Failed to download file {file_name}, status: {response.status_code}")
+                continue
+                
+            with open(file_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    
+            print(f"Downloaded {file_name} to {file_path}")
         
-        updated_lora_files = get_updated_lora_files()
-        return (
-            gr.update(choices=updated_lora_files),
-            gr.update(choices=updated_lora_files),
-            gr.update(choices=updated_lora_files),
-            f"Successfully downloaded model files to lora/{model_name}"
-        )
-        
+        # Update LoRA choices
+        lora_choices = get_lora_choices()
+        return lora_choices, lora_choices, lora_choices, lora_choices, lora_choices, f"Successfully downloaded LoRA model: {model_name}"
+            
     except Exception as e:
-        print(f"Error downloading model: {str(e)}")
-        return gr.update(), gr.update(), gr.update(), f"Error: {str(e)}"
+        error_message = f"Error downloading LoRA model: {str(e)}"
+        print(f"Error: {error_message}")
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), error_message
 
 def save_api_key(api_key, key_type="civitai"):
     """

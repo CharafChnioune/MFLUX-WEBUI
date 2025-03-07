@@ -11,7 +11,7 @@ from backend.flux_manager import (
     print_memory_usage
 )
 from backend.lora_manager import process_lora_files
-from mflux.config.config import Config, ConfigControlnet
+from mflux.config.config import Config
 
 def update_guidance_visibility(model):
     """
@@ -149,7 +149,7 @@ def generate_image_controlnet_gradio(prompt, control_image, model, seed, height,
         seed_int = None if seed.strip() == "" else int(seed)
         steps_int = 4 if not steps or steps.strip() == "" else int(steps)
 
-        config = ConfigControlnet()
+        config = Config()
         config.controlnet_conditioning_scale = float(controlnet_strength)
         config.save_controlnet_canny = bool(save_canny)
 
@@ -237,3 +237,15 @@ def generate_image_i2i_gradio(prompt, init_image, init_image_strength, model, se
     except Exception as e:
         print(f"Error generating image: {str(e)}")
         return [], "", prompt
+
+def process_controlnet_image(flux_model, cnn_image, additional_prompt, prompt_strength=0.5, controlnet_strength=0.5):
+    """
+    Process a control image with controlnet.
+    """
+    CONFIG = {}
+    # Controlnet config
+    config = Config()
+    config.height = 1024
+    config.width = 1024
+    config.guidance = 7.0
+    config.controlnet_strength = controlnet_strength

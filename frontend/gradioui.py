@@ -6,7 +6,7 @@ import random
 import gradio as gr
 from pathlib import Path
 from PIL import Image
-from mflux.config.config import Config, ConfigControlnet
+from mflux.config.config import Config
 from typing import List, Tuple
 
 # Import components
@@ -16,6 +16,7 @@ from frontend.components.controlnet import create_controlnet_tab
 from frontend.components.image_to_image import create_image_to_image_tab
 from frontend.components.model_lora_management import create_model_lora_management_tab
 from frontend.components.dreambooth_fine_tuning import create_dreambooth_fine_tuning_tab
+from frontend.components.in_context_lora import create_in_context_lora_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -39,7 +40,8 @@ from backend.flux_manager import (
     simple_generate_image,
     generate_image_gradio,
     generate_image_controlnet_gradio,
-    generate_image_i2i_gradio
+    generate_image_i2i_gradio,
+    generate_image_in_context_lora_gradio
 )
 from backend.mlx_vlm_manager import (
     get_available_mlx_vlm_models,
@@ -134,6 +136,11 @@ def create_ui():
                 image_to_image_components = create_image_to_image_tab()
                 lora_files_i2i = image_to_image_components['lora_files']
                 model_i2i = image_to_image_components['model']
+                
+            with gr.TabItem("In-Context LoRA"):
+                in_context_lora_components = create_in_context_lora_tab()
+                lora_files_icl = in_context_lora_components['lora_files']
+                model_icl = in_context_lora_components['model']
 
             with gr.TabItem("Dreambooth Fine-Tuning"):
                 dreambooth_components = create_dreambooth_fine_tuning_tab()
@@ -147,7 +154,9 @@ def create_ui():
                     lora_files_simple=lora_files_simple,
                     lora_files=lora_files,
                     lora_files_cn=lora_files_cn,
-                    lora_files_i2i=lora_files_i2i
+                    lora_files_i2i=lora_files_i2i,
+                    lora_files_icl=lora_files_icl,
+                    model_icl=model_icl
                 )
 
         return demo
