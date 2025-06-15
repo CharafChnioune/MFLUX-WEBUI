@@ -1,8 +1,9 @@
-mflux==0.6.0
-gradio==5.20.0
-ollama==0.4.7
+mflux==0.8.0
+# Pinned latest compatible versions (2025-06-15)
+gradio==5.31.0
+ollama==0.4.8
 requests==2.32.3
 beautifulsoup4==4.13.3
-mlx-vlm==0.1.16
-mlx-lm==0.21.5
+mlx-vlm==0.1.17
+mlx-lm==0.22.0
 peft==0.14.0

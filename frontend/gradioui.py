@@ -17,6 +17,14 @@ from frontend.components.image_to_image import create_image_to_image_tab
 from frontend.components.model_lora_management import create_model_lora_management_tab
 from frontend.components.dreambooth_fine_tuning import create_dreambooth_fine_tuning_tab
 from frontend.components.in_context_lora import create_in_context_lora_tab
+# New feature components
+from frontend.components.fill import create_fill_tab
+from frontend.components.depth import create_depth_tab
+from frontend.components.redux import create_redux_tab
+from frontend.components.upscale import create_upscale_tab
+from frontend.components.catvton import create_catvton_tab
+from frontend.components.ic_edit import create_ic_edit_tab
+from frontend.components.concept_attention import create_concept_attention_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -144,6 +152,28 @@ def create_ui():
 
             with gr.TabItem("Dreambooth Fine-Tuning"):
                 dreambooth_components = create_dreambooth_fine_tuning_tab()
+
+            # --- New feature tabs ---
+            with gr.TabItem("Fill"):
+                fill_components = create_fill_tab()
+
+            with gr.TabItem("Depth"):
+                depth_components = create_depth_tab()
+
+            with gr.TabItem("Redux"):
+                redux_components = create_redux_tab()
+
+            with gr.TabItem("Upscale"):
+                upscale_components = create_upscale_tab()
+
+            with gr.TabItem("Concept Attention"):
+                concept_attention_components = create_concept_attention_tab()
+
+            with gr.TabItem("CatVTON"):
+                catvton_components = create_catvton_tab()
+
+            with gr.TabItem("IC-Edit"):
+                ic_edit_components = create_ic_edit_tab()
 
             with gr.TabItem("Model & LoRA Management"):
                 model_lora_management_components = create_model_lora_management_tab(
