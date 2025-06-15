@@ -169,6 +169,70 @@ The Models tab enables you to manage models:
   - Select the quantization level (4-bit or 8-bit).
   - View the quantization output in a dedicated textbox.
 
+### Fill Tool (Inpaint/Outpaint)
+
+The Fill Tool lets you remove objects or extend the canvas of an existing image.
+
+- **Input Image** with optional **Mask Image** indicating the region to fill/outpaint  
+- **Prompt** describing what should appear in the masked / empty area  
+- **Width / Height**, **Steps**, **Guidance Scale** sliders for fine-tuning  
+- Supports **Low-RAM mode**, **3/4/6/8-bit quantization**, and **metadata export**
+
+### Depth Tool
+
+Generate images guided by the depth map extracted from a reference photo.
+
+- **Reference Image** and text **Prompt**  
+- **ControlNet Strength** slider controls depth influence  
+- Option to save the extracted depth map alongside the result
+
+### Redux
+
+Create multiple stylistic variations of a reference image in a single click.
+
+- **Redux Strength** slider determines how different the variations are  
+- Specify **number of variations**, seed, steps, and guidance
+
+### Upscale
+
+Increase resolution up to 4× while preserving detail.
+
+- Accepts any **Input Image** (optionally with a descriptive **Prompt**)  
+- Intelligent patch-based upscaling, ControlNet-aware for advanced guidance  
+- Adjustable **Upscale Factor**, **Steps**, **Sharpen Strength**, and more
+
+### CatVTON (Virtual Try-On)
+
+Virtually dress a person in a garment image.
+
+- **Person Image + Mask** identifying clothing region  
+- **Garment Image** to apply  
+- Auto-generated prompt if none provided  
+- Outputs both a diptych preview and the final try-on image
+
+### IC-Edit (In-Context Editing)
+
+Edit an image using a natural-language instruction.
+
+- **Reference Image** and an **Instruction Prompt** (e.g. "make it snowy")  
+- Generate one or multiple edited variants  
+- Full control over seed, steps, guidance, and quantization
+
+### Concept Attention
+
+Apply weighted concepts directly in your prompt using the `{concept:weight}` syntax.
+
+- Supports multiple weighted tags per prompt  
+- Displays parsed concepts and weights before generation  
+- Works with any model or LoRA combo
+
+### In-Context LoRA
+
+Apply the style of a reference image on-the-fly without external LoRA files.
+
+- **Reference Image** is encoded into a temporary LoRA  
+- Adjustable strength slider; combine with standard LoRAs for unique results
+
 ## LoRA Integration
 
 LoRA (Low-Rank Adaptation) allows for fine-tuned models to be used in image generation:
