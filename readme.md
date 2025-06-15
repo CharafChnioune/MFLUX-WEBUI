@@ -6,24 +6,30 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio.
 
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the MFLUX image generation system. It provides an intuitive way to interact with MFLUX models, offering both simple and advanced options for image generation, as well as support for ControlNet, LoRA integration, and image-to-image transformation.
+MFLUX WebUI is a comprehensive interface for the **MFLUX 0.8.0** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools such as Fill, Depth, Redux, Upscale, CatVTON, IC-Edit, and Concept Attention.
 
 ## Features
 
-- 🖼️ Simple and advanced image generation interfaces
-- 🎨 **Image-to-Image Transformation** for enhancing and modifying existing images
-- 🎛️ ControlNet support for guided image generation
-- 🧠 LoRA (Low-Rank Adaptation) integration for fine-tuned models
-- 🎯 **Dreambooth Fine-Tuning** for training custom models
-- ⚙️ Model quantization options for optimized performance
-- 🌈 User-friendly UI suitable for both beginners and advanced users
-- 🔧 Customizable settings for precise control over image generation
+- 🖼️ Simple and advanced **text-to-image** generation
+- 🎨 **Image-to-Image** transformation
+- 🖌️ **Fill Tool (Inpaint/Outpaint)**
+- 🌊 **Depth Tool** with depth-guided generation
+- 🔁 **Redux** image variation generator
+- ⬆️ **Upscale** high-resolution upscaling (ControlNet-aware)
+- 👕 **CatVTON** virtual try-on
+- ✏️ **IC-Edit** in-context editing
+- 🧩 **Concept Attention** fine-grained prompt control
+- 🎛️ ControlNet support
+- 🧠 Multi-LoRA support & dynamic prompt files
+- ⚡ Quantization (3-,4-,6-,8-bit) & Low RAM mode
+- 📤 Metadata export & auto-seed
+- 🌈 User-friendly UI for beginners and experts
 - 🤖 Ollama integration for prompt enhancement
-- 📥 LoRA download functionality
+- 🎯 **Dreambooth Fine-Tuning**
 
 ## Installation
 
@@ -66,14 +72,22 @@ Access the interface in your web browser at `http://localhost:7860`.
 
 ### Interface Overview
 
-The MFLUX WebUI consists of six main tabs:
+The MFLUX WebUI now contains the following tabs:
 
-1. **MFLUX Easy**: A simplified interface for quick image generation.
-2. **Advanced Generate**: Provides full control over image generation parameters.
-3. **ControlNet**: Enables guided image generation using a control image.
-4. **Image-to-Image**: Transform existing images with new prompts.
-5. **Dreambooth Fine-Tuning**: Train and fine-tune your own models.
-6. **Models**: Allows for model management, including downloading, adding, and quantizing models.
+1. **MFLUX Easy** – quick text-to-image generation  
+2. **Advanced Generate** – full control over generation parameters  
+3. **ControlNet** – guided generation with control images  
+4. **Image-to-Image** – transform existing images  
+5. **Fill Tool (Inpaint/Outpaint)** – remove or extend content  
+6. **Depth Tool** – depth-guided generation  
+7. **Redux** – create image variations  
+8. **Upscale** – intelligent upscaling  
+9. **CatVTON** – virtual try-on  
+10. **IC-Edit** – in-context editing  
+11. **Concept Attention** – weighted prompt control  
+12. **In-Context LoRA** – apply reference styles  
+13. **Dreambooth Fine-Tuning** – train custom models  
+14. **Model & LoRA Management** – download, quantize & manage models
 
 ## Project Structure
 
