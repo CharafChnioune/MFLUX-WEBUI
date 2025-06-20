@@ -268,6 +268,8 @@ def generate_image_gradio(
     lora_files, metadata, ollama_model=None, system_prompt=None,
     *lora_scales, num_images=1, low_ram=False, auto_seeds=None
 ):
+    # This handles extra parameters the frontend might send
+    # Get only the parameters we need by position
     """
     Generate images using the Flux model through the Gradio interface.
     """
@@ -399,6 +401,8 @@ def generate_image_controlnet_gradio(
     controlnet_strength, lora_files, metadata, save_canny,
     *lora_scales, num_images=1, low_ram=False
 ):
+    # This handles extra parameters the frontend might send
+    # The *lora_scales variable-length argument captures any extra parameters
     """
     Generate an image with controlnet guidance.
     """
@@ -576,6 +580,8 @@ def generate_image_i2i_gradio(
     prompt, input_image, model, seed, height, width, steps, guidance,
     image_strength, lora_files, metadata, *lora_scales, num_images=1, low_ram=False
 ):
+    # This handles extra parameters the frontend might send
+    # The *lora_scales variable-length argument captures any extra parameters
     """
     Generate an image based on an input image.
     """

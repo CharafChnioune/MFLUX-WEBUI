@@ -43,7 +43,7 @@ def create_advanced_generate_tab():
                 choices=get_updated_models(),
                 label="Model",
                 value="schnell-4-bit"
-            )
+            )  # No allow_custom_value to prevent errors
 
             with gr.Row():
                 width = gr.Number(label="Width", value=576, precision=0)

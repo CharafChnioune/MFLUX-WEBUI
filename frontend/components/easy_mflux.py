@@ -24,8 +24,7 @@ def create_easy_mflux_tab():
             model_simple = gr.Dropdown(
                 choices=get_updated_models(),
                 label="Model",
-                value="schnell-4-bit",
-                allow_custom_value=True
+                value="schnell-4-bit"
             )
             
             image_format = gr.Dropdown(
