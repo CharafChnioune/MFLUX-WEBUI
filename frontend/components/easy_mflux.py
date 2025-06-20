@@ -46,7 +46,6 @@ def create_easy_mflux_tab():
                     choices=get_lora_choices(),
                     label="Select LoRA Files",
                     multiselect=True,
-                    allow_custom_value=True,
                     value=[],
                     interactive=True,
                     scale=9
