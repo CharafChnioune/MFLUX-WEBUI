@@ -156,7 +156,6 @@ def create_controlnet_tab():
                     choices=get_lora_choices(),
                     label="Select LoRA Files",
                     multiselect=True,
-                    allow_custom_value=True,
                     value=[],
                     interactive=True,
                     scale=9
