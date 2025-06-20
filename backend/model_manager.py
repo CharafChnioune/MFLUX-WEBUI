@@ -13,6 +13,7 @@ class CustomModelConfig:
         self.base_arch = base_arch
         self.supports_guidance = (base_arch == "dev")
         self.custom_transformer_model = model_name  # Added for compatibility with mflux library
+        self.requires_sigma_shift = False  # Added for compatibility with RuntimeConfig
 
     def is_dev(self):
         """Check if this is a dev model configuration."""
