@@ -125,6 +125,12 @@ def create_advanced_generate_tab():
                 inputs=[lora_files],
                 outputs=lora_scales
             )
+            
+            # Add click handler for the refresh button
+            refresh_lora.click(
+                fn=lambda: gr.update(choices=get_lora_choices()),
+                outputs=[lora_files]
+            )
 
             # Options for generating multiple images
             with gr.Row():
