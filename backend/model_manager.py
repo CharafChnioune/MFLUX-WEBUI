@@ -12,6 +12,7 @@ class CustomModelConfig:
         self.max_sequence_length = max_sequence_length
         self.base_arch = base_arch
         self.supports_guidance = (base_arch == "dev")
+        self.custom_transformer_model = model_name  # Added for compatibility with mflux library
 
     def is_dev(self):
         """Check if this is a dev model configuration."""
