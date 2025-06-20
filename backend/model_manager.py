@@ -17,6 +17,11 @@ class CustomModelConfig:
     def is_dev(self):
         """Check if this is a dev model configuration."""
         return self.base_arch == "dev"
+        
+    def x_embedder_input_dim(self):
+        """Return the input dimension for the x_embedder.
+        This method is required by the mflux library's Transformer implementation."""
+        return 3072
 
     @staticmethod
     def from_alias(alias):
