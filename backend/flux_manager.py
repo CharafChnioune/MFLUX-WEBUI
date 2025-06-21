@@ -71,6 +71,10 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
         FluxClass = Flux1Controlnet if is_controlnet else Flux1
         print(f"Creating {FluxClass.__name__} with model_config={custom_config}, quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, lora_scales={lora_scales}")
         try:
+            # Convert lora_scales to tuple if it's a list to avoid type error
+            if lora_scales is not None and not isinstance(lora_scales, tuple):
+                lora_scales = tuple(lora_scales)
+            
             flux = FluxClass(
                 model_config=custom_config,
                 quantize=quantize,
