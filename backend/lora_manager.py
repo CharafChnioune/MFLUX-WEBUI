@@ -114,8 +114,8 @@ def process_lora_files(selected_loras, lora_scales=None):
         while len(lora_scales_float) < len(valid_loras):
             lora_scales_float.append(1.0)
             
-        # Return as tuple since mflux library expects tuple for lora_scales
-        return tuple(lora_scales_float)
+        # Return as list so mflux library can concatenate with another list
+        return lora_scales_float
     
     return valid_loras
 

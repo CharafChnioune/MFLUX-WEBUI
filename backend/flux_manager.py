@@ -71,9 +71,19 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
         FluxClass = Flux1Controlnet if is_controlnet else Flux1
         print(f"Creating {FluxClass.__name__} with model_config={custom_config}, quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, lora_scales={lora_scales}")
         try:
-            # Convert lora_scales to tuple if it's a list to avoid type error
-            if lora_scales is not None and not isinstance(lora_scales, tuple):
-                lora_scales = tuple(lora_scales)
+            # Special handling for lora_scales to work with mflux library's internals.
+            # mflux library does: flux_model.lora_scales = (lora_scales or []) + [1.0] * len(hf_lora_paths)
+            # So we need to pass lora_scales as a LIST instead of a tuple to allow this to work
+            
+            # If no lora paths, don't pass any scales
+            if not lora_paths:
+                lora_scales = None
+            # If lora paths but no scales, pass an empty list to allow concatenation
+            elif lora_scales is None:
+                lora_scales = []
+            # If lora paths and scales, ensure scales is a list
+            elif isinstance(lora_scales, tuple):
+                lora_scales = list(lora_scales)
             
             flux = FluxClass(
                 model_config=custom_config,
