@@ -50,48 +50,79 @@ def download_lora_model(page_url, api_key):
         
         model_data = response.json()
         model_name = model_data.get("name", "unknown_model")
-        model_version_id = model_data.get("modelVersions", [{}])[0].get("id")
+        model_versions = model_data.get("modelVersions", [])
+        
+        if not model_versions:
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No model versions found"
+        
+        # Get the latest model version
+        model_version = model_versions[0]  # First one is usually the latest
+        model_version_id = model_version.get("id")
         
         if not model_version_id:
-            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No model version found"
-        
-        # Download model files
-        download_url = f"https://civitai.com/api/v1/model-versions/{model_version_id}/files"
-        response = requests.get(download_url, headers=headers)
-        
-        if response.status_code != 200:
-            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: Failed to get download links, status: {response.status_code}"
-        
-        files_data = response.json()
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No model version ID found"
+            
+        # Get download files information
+        files = model_version.get("files", [])
+        if not files:
+            # If files are not included in the initial response, fetch them separately
+            files_url = f"https://civitai.com/api/v1/model-versions/{model_version_id}"
+            files_response = requests.get(files_url, headers=headers)
+            
+            if files_response.status_code != 200:
+                return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), f"Error: Failed to get model files, status: {files_response.status_code}"
+                
+            files = files_response.json().get("files", [])
+            
+        if not files:
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No files found for this model version"
         
         # Ensure lora directory exists
         lora_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lora")
         os.makedirs(lora_dir, exist_ok=True)
         
-        for file_info in files_data:
+        downloaded = False
+        for file_info in files:
             file_name = file_info.get("name")
-            if not file_name:
+            if not file_name or not (file_name.endswith(".safetensors") or file_name.endswith(".ckpt") or file_name.endswith(".pt")):
                 continue
                 
+            # Construct download URL with the token
             download_url = file_info.get("downloadUrl")
             if not download_url:
                 print(f"Warning: No download URL for file {file_name}")
                 continue
                 
+            # Add token to URL if it doesn't already have one
+            if "?" in download_url:
+                download_url = f"{download_url}&token={api_key}"
+            else:
+                download_url = f"{download_url}?token={api_key}"
+                
             file_path = os.path.join(lora_dir, file_name)
-            response = requests.get(download_url, headers=headers, stream=True)
+            print(f"Downloading file: {file_name} to {file_path}")
+            
+            # Stream the download
+            response = requests.get(download_url, stream=True)
             
             if response.status_code != 200:
                 print(f"Warning: Failed to download file {file_name}, status: {response.status_code}")
                 continue
                 
+            total_size = int(response.headers.get("content-length", 0))
             with open(file_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    
-            print(f"Downloaded {file_name} to {file_path}")
+                    if chunk:
+                        f.write(chunk)
+            
+            print(f"Successfully downloaded {file_name} to {file_path}")
+            downloaded = True
         
-        # Update LoRA choices
+        if not downloaded:
+            return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), "Error: No suitable files found to download"
+        
+        # Get updated list of lora files
+        from backend.lora_manager import get_lora_choices
         lora_choices = get_lora_choices()
         return lora_choices, lora_choices, lora_choices, lora_choices, lora_choices, f"Successfully downloaded LoRA model: {model_name}"
             
