@@ -108,7 +108,8 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
     try:
         login_result = login_huggingface(api_key)
         if "Error" in login_result:
-            return None, f"HF Login failed: {login_result}"
+            # Return None for all model dropdowns and the error message
+            return None, None, None, None, None, f"HF Login failed: {login_result}"
 
         model_dir = os.path.join("models", alias)
         os.makedirs(model_dir, exist_ok=True)
@@ -122,13 +123,18 @@ def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_
         new_config = CustomModelConfig(hf_model_name, alias, num_train_steps, max_sequence_length, base_arch)
         MODELS[alias] = new_config
 
+        # Get updated model choices for all dropdowns
+        model_choices = get_model_choices()
+        
         print(f"Model {hf_model_name} successfully downloaded and saved as {alias}")
-        return new_config, "Success"
+        # Return updated model choices for all 5 dropdowns and success message
+        return model_choices, model_choices, model_choices, model_choices, model_choices, "Success"
 
     except Exception as e:
         error_message = f"Error downloading model: {str(e)}"
         print(f"Error: {error_message}")
-        return None, error_message
+        # Return None for all model dropdowns and the error message
+        return None, None, None, None, None, error_message
 
 def login_huggingface(api_key):
     """
@@ -158,3 +164,11 @@ def update_guidance_visibility(model):
     """
     is_dev = "dev" in model
     return gr.update(visible=True, label="Guidance Scale (required for dev models)" if is_dev else "Guidance Scale (optional)")
+
+def get_model_choices():
+    """
+    Get model choices for Gradio dropdowns.
+    This function wraps get_updated_models() to provide model choices for UI components.
+    """
+    models = get_updated_models()
+    return gr.update(choices=models) if models else gr.update()
