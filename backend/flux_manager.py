@@ -12,9 +12,20 @@ from backend.lora_manager import process_lora_files, download_lora
 from backend.ollama_manager import enhance_prompt
 from backend.prompts_manager import enhance_prompt_with_mlx
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
+from backend.generation_workflow import (
+    get_generation_workflow,
+    check_pre_generation,
+    process_dynamic_prompt,
+    get_next_seed,
+    monitor_step_progress,
+    save_enhanced_metadata,
+    update_generation_stats
+)
 import json
 from pathlib import Path
 import numpy as np
+import re
+from typing import Union, Tuple, Optional
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -30,7 +41,63 @@ def parse_image_format(image_format):
         return width, height
     except Exception as e:
         print(f"Error parsing image format: {str(e)}")
-        return 512, 512 
+        return 512, 512
+
+def parse_scale_factor(dimension_value: str, original_dimension: int = None) -> int:
+    """
+    Parse scale factor or absolute dimension value.
+    Examples:
+    - "2x" -> 2 * original_dimension
+    - "1.5x" -> 1.5 * original_dimension  
+    - "1024" -> 1024
+    - "auto" -> original_dimension
+    """
+    if dimension_value is None or dimension_value == "":
+        return 512  # Default
+    
+    dimension_value = str(dimension_value).strip().lower()
+    
+    if dimension_value == "auto":
+        return original_dimension if original_dimension else 512
+    
+    # Check for scale factor (e.g., "2x", "1.5x")
+    scale_match = re.match(r'^([0-9]*\.?[0-9]+)x$', dimension_value)
+    if scale_match:
+        scale = float(scale_match.group(1))
+        if original_dimension:
+            result = int(scale * original_dimension)
+            # Align to 16-pixel boundaries for optimal results
+            return ((result + 15) // 16) * 16
+        else:
+            return 512  # Fallback if no original dimension
+    
+    # Try to parse as absolute value
+    try:
+        return int(float(dimension_value))
+    except ValueError:
+        return 512  # Fallback
+
+def calculate_dimensions_with_scale(
+    width_input: Union[str, int], 
+    height_input: Union[str, int], 
+    original_image: Optional[Image.Image] = None
+) -> Tuple[int, int]:
+    """
+    Calculate final dimensions supporting scale factors and mixed types.
+    """
+    original_width = original_image.width if original_image else None
+    original_height = original_image.height if original_image else None
+    
+    width = parse_scale_factor(width_input, original_width)
+    height = parse_scale_factor(height_input, original_height)
+    
+    # Safety check for very large dimensions
+    MAX_DIMENSION = 2048
+    if width > MAX_DIMENSION or height > MAX_DIMENSION:
+        print(f"Warning: Requested dimensions ({width}x{height}) exceed recommended limit ({MAX_DIMENSION}x{MAX_DIMENSION})")
+        print("This may cause memory issues or slow generation.")
+    
+    return width, height 
 
 def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_scales=None, is_controlnet=False, low_ram=False):
     """
@@ -272,58 +339,196 @@ def simple_generate_image(
         force_mlx_cleanup()
 
 def generate_image_gradio(
-    prompt, model, seed, width, height, steps, guidance, 
+    prompt, model, base_model, seed, width, height, steps, guidance, 
     lora_files, metadata, ollama_model=None, system_prompt=None,
-    *lora_scales, num_images=1, low_ram=False, auto_seeds=None
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False, auto_seeds=None
 ):
     """
-    Generate images using the Flux model through the Gradio interface.
+    Generate images using the Flux model through the Gradio interface with v0.9.0 features.
     """
+    workflow = get_generation_workflow()
+    
     try:
-        print(f"\n--- Generating image (Gradio) ---")
+        print(f"\n--- Generating image (Gradio v0.9.0) ---")
         print(f"Model: {model}")
-        print(f"Prompt: {prompt}")
+        print(f"Base Model: {base_model}")
+        print(f"Original Prompt: {prompt}")
         print(f"Dimensions: {width}x{height}")
         print(f"Steps: {steps}")
         print(f"Guidance: {guidance}")
         print(f"Seed: {seed}")
         print(f"Auto Seeds: {auto_seeds}")
         print(f"LoRA files: {lora_files}")
-        print(f"LoRA scales: {lora_scales}")
         print(f"Number of Images: {num_images}")
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before generation")
 
-        # Omzetten van lora_scales van tuple van strings naar lijst van floats
+        # 1. Pre-generation checks (battery, config validation, etc.)
+        pre_checks = check_pre_generation()
+        if not pre_checks["can_proceed"]:
+            error_msg = "\n".join(pre_checks["errors"])
+            print(f"Pre-generation check failed: {error_msg}")
+            return [], error_msg, prompt
+        
+        if pre_checks["warnings"]:
+            warnings_msg = "\n".join(pre_checks["warnings"])
+            print(f"Pre-generation warnings: {warnings_msg}")
+
+        # 2. Load prompt from file if specified (--prompt-file support)
+        if prompt_file and prompt_file.strip():
+            try:
+                from backend.dynamic_prompts_manager import load_prompt_from_file
+                file_prompt = load_prompt_from_file(prompt_file.strip())
+                if file_prompt:
+                    print(f"Loaded prompt from file '{prompt_file}': {file_prompt}")
+                    prompt = file_prompt
+                else:
+                    print(f"Warning: Could not load prompt from file '{prompt_file}', using original prompt")
+            except Exception as e:
+                print(f"Error loading prompt file '{prompt_file}': {str(e)}")
+                print("Using original prompt instead")
+
+        # 3. Load config from metadata if specified (--config-from-metadata support)
+        if config_from_metadata and config_from_metadata.strip():
+            try:
+                from backend.metadata_config_manager import load_config_from_image_metadata, apply_metadata_config
+                loaded_config = load_config_from_image_metadata(config_from_metadata.strip())
+                if loaded_config:
+                    print(f"Loaded config from metadata '{config_from_metadata}': {loaded_config}")
+                    
+                    # Apply loaded config to current parameters
+                    current_params = {
+                        'prompt': prompt, 'model': model, 'seed': seed, 'width': width, 'height': height,
+                        'steps': steps, 'guidance': guidance, 'lora_files': lora_files, 'low_ram': low_ram
+                    }
+                    updated_params = apply_metadata_config(loaded_config, current_params)
+                    
+                    # Update parameters with loaded values where appropriate
+                    if 'prompt' in updated_params and updated_params['prompt'] != prompt:
+                        prompt = updated_params['prompt']
+                        print(f"Updated prompt from metadata: {prompt}")
+                    if 'seed' in updated_params and updated_params['seed'] != seed:
+                        seed = updated_params['seed']
+                        print(f"Updated seed from metadata: {seed}")
+                    if 'steps' in updated_params and updated_params['steps'] != steps:
+                        steps = updated_params['steps']
+                        print(f"Updated steps from metadata: {steps}")
+                    if 'guidance' in updated_params and updated_params['guidance'] != guidance:
+                        guidance = updated_params['guidance']
+                        print(f"Updated guidance from metadata: {guidance}")
+                    if 'width' in updated_params and updated_params['width'] != width:
+                        width = updated_params['width']
+                        print(f"Updated width from metadata: {width}")
+                    if 'height' in updated_params and updated_params['height'] != height:
+                        height = updated_params['height']
+                        print(f"Updated height from metadata: {height}")
+                else:
+                    print(f"Warning: Could not load config from metadata '{config_from_metadata}'")
+            except Exception as e:
+                print(f"Error loading config from metadata '{config_from_metadata}': {str(e)}")
+                print("Using original parameters instead")
+
+        # 4. Setup stepwise output if specified (--stepwise-image-output-dir support)
+        stepwise_enabled = False
+        if stepwise_output_dir and stepwise_output_dir.strip():
+            try:
+                from backend.stepwise_output_manager import setup_stepwise_output
+                session_name = f"generation_{int(time.time())}"
+                stepwise_enabled = setup_stepwise_output(stepwise_output_dir.strip(), session_name)
+                if stepwise_enabled:
+                    print(f"Stepwise output enabled: {stepwise_output_dir.strip()}/{session_name}")
+                else:
+                    print(f"Warning: Could not setup stepwise output directory '{stepwise_output_dir}'")
+            except Exception as e:
+                print(f"Error setting up stepwise output '{stepwise_output_dir}': {str(e)}")
+                stepwise_enabled = False
+
+        # 5. Setup VAE tiling if specified (--vae-tiling & --vae-tiling-split support)
+        vae_tiling_enabled = False
+        try:
+            from backend.vae_tiling_manager import setup_vae_tiling, should_use_vae_tiling
+            auto_tiling = should_use_vae_tiling(width, height)
+        except Exception as e:
+            print(f"Error importing VAE tiling manager: {str(e)}")
+            auto_tiling = False
+            
+        if vae_tiling or auto_tiling:
+            try:
+                tile_size = 512  # Default tile size
+                overlap = 64     # Default overlap
+                split_factor = max(1, int(vae_tiling_split)) if vae_tiling_split else 1
+                
+                vae_tiling_enabled = setup_vae_tiling(True, tile_size, overlap, split_factor)
+                if vae_tiling_enabled:
+                    print(f"VAE tiling enabled: tile_size={tile_size}, split_factor={split_factor}")
+                    # Enable low RAM mode for large images with tiling
+                    if width * height > 1024 * 1024:
+                        low_ram = True
+                        print("Enabled low RAM mode for large image with VAE tiling")
+                else:
+                    print("Warning: Could not setup VAE tiling")
+            except Exception as e:
+                print(f"Error setting up VAE tiling: {str(e)}")
+                vae_tiling_enabled = False
+
+        # 6. Process dynamic prompts
+        processed_prompt = process_dynamic_prompt(prompt)
+        if processed_prompt != prompt:
+            print(f"Dynamic prompt processed: {processed_prompt}")
+        prompt = processed_prompt
+
+        # 7. Process LoRA files and scales
         lora_scales_float = process_lora_files(lora_files, lora_scales)
         
-        # Enhance prompt if requested
+        # 8. Enhance prompt with Ollama if requested
         if ollama_model and system_prompt:
             prompt = enhance_prompt(prompt, ollama_model, system_prompt)
+            print(f"Ollama enhanced prompt: {prompt}")
             
-        # Auto seeds verwerken
+        # 9. Determine seeds to use (auto-seeds integration)
+        seeds = []
         if auto_seeds and auto_seeds > 0:
+            # Legacy auto-seeds support
             seeds = [random.randint(1, 1000000000) for _ in range(auto_seeds)]
+        elif seed is not None:
+            seeds = [seed]
         else:
-            seeds = [seed] if seed else [get_random_seed()]
+            # Use workflow seed management (integrates with auto-seeds manager)
+            seeds = [get_next_seed(seed) for _ in range(num_images)]
         
         all_images = []
         all_seeds = []
+        all_metadata = []
+        generation_start_time = time.time()
         
-        for current_seed in seeds:
-            # Flux model initialiseren
-            flux = get_or_create_flux(
-                model=model,
-                lora_paths=lora_files,
-                lora_scales=lora_scales_float,
-                low_ram=low_ram
-            )
-            
-            if not flux:
-                return [], "", prompt
-                
+        for i, current_seed in enumerate(seeds):
             try:
-                # Guidance waarde: we zorgen ervoor dat het nooit None is
+                # Check if we should stop/pause before each generation
+                progress_status = monitor_step_progress(i, len(seeds))
+                if not progress_status["should_continue"]:
+                    print(f"Generation stopped: {progress_status.get('stop_reason', 'Unknown')}")
+                    break
+                
+                if progress_status["should_pause"]:
+                    print(f"Generation paused: {progress_status.get('pause_reason', 'Unknown')}")
+                    workflow.handle_generation_pause()
+                    continue
+
+                # Initialize Flux model
+                flux = get_or_create_flux(
+                    model=model,
+                    lora_paths=lora_files,
+                    lora_scales=lora_scales_float,
+                    low_ram=low_ram
+                )
+                
+                if not flux:
+                    print("Failed to initialize Flux model")
+                    update_generation_stats(success=False)
+                    continue
+                    
+                # Prepare generation parameters
                 if guidance is None:
                     is_dev_model = "dev" in model
                     guidance_value = 4.0 if is_dev_model else 0.0
@@ -332,80 +537,111 @@ def generate_image_gradio(
                 
                 steps_int = 4 if not steps or steps.strip() == "" else int(steps)
                 
-                # Genereer de afbeelding
-                print(f"Generating with seed: {current_seed}, steps: {steps_int}, guidance: {guidance_value}")
+                # Generate the image with progress monitoring
+                print(f"Generating image {i+1}/{len(seeds)} with seed: {current_seed}")
+                generation_config = Config(
+                    num_inference_steps=steps_int,
+                    height=height,
+                    width=width,
+                    guidance=guidance_value,
+                )
+                
                 generated = flux.generate_image(
                     seed=current_seed,
                     prompt=prompt,
-                    config=Config(
-                        num_inference_steps=steps_int,
-                        height=height,
-                        width=width,
-                        guidance=guidance_value,
-                    ),
+                    config=generation_config,
                 )
                 
-                # Verwerk het resultaat
+                # Process the result
                 pil_image = generated.image
                 timestamp = int(time.time())
                 filename = f"generated_{timestamp}_{current_seed}.png"
                 
-                # Sla de afbeelding op
+                # Save the image
                 output_path = os.path.join(OUTPUT_DIR, filename)
                 pil_image.save(output_path)
                 
-                # Optioneel: metadata opslaan
+                # Prepare enhanced metadata
+                generation_metadata = {
+                    "prompt": prompt,
+                    "original_prompt": prompt if processed_prompt == prompt else processed_prompt,
+                    "seed": current_seed,
+                    "steps": steps_int,
+                    "guidance": guidance_value,
+                    "width": width,
+                    "height": height,
+                    "model": model,
+                    "generation_time": str(time.ctime()),
+                    "generation_duration": time.time() - generation_start_time,
+                    "lora_files": lora_files,
+                    "lora_scales": lora_scales_float,
+                    "low_ram_mode": low_ram,
+                    "filename": filename
+                }
+                
+                # Save enhanced metadata using workflow
                 if metadata:
-                    metadata_path = os.path.join(OUTPUT_DIR, f"generated_{timestamp}_{current_seed}.json")
-                    metadata_dict = {
-                        "prompt": prompt,
-                        "seed": current_seed,
-                        "steps": steps_int,
-                        "guidance": guidance_value,
-                        "width": width,
-                        "height": height,
-                        "model": model,
-                        "generation_time": str(time.ctime()),
-                        "lora_files": lora_files,
-                        "lora_scales": lora_scales_float
-                    }
-                    with open(metadata_path, "w") as f:
-                        json.dump(metadata_dict, f, indent=2)
+                    save_enhanced_metadata(Path(output_path), generation_metadata)
                 
                 all_images.append(pil_image)
                 all_seeds.append(current_seed)
+                all_metadata.append(generation_metadata)
                 
-                print(f"Generated image with seed {current_seed} saved to {output_path}")
+                # Update statistics
+                update_generation_stats(success=True)
+                
+                print(f"Successfully generated image {i+1} with seed {current_seed}")
                 
             except Exception as e:
-                print(f"Error generating image with seed {current_seed}: {str(e)}")
+                print(f"Error generating image {i+1} with seed {current_seed}: {str(e)}")
                 import traceback
                 traceback.print_exc()
+                update_generation_stats(success=False)
             
             finally:
-                # Cleanup
+                # Cleanup after each generation
                 if 'flux' in locals():
                     del flux
                 gc.collect()
                 force_mlx_cleanup()
         
-        # Bereid de output voor
+        # Final cleanup and results
+        workflow.reset_workflow_state()
+        
         if all_images:
-            seed_info = [f"Seed: {seed}" for seed in all_seeds]
-            return all_images, "\n".join(seed_info), prompt
+            # Prepare result information
+            seed_info = []
+            for i, (seed, meta) in enumerate(zip(all_seeds, all_metadata)):
+                duration = meta.get('generation_duration', 0)
+                seed_info.append(f"Image {i+1}: Seed {seed} ({duration:.1f}s)")
+            
+            result_info = "\n".join(seed_info)
+            if pre_checks["warnings"]:
+                result_info += "\n\nWarnings:\n" + "\n".join(pre_checks["warnings"])
+            
+            print(f"Generation completed: {len(all_images)} images generated")
+            return all_images, result_info, prompt
         else:
-            return [], "No images were generated", prompt
+            return [], "No images were generated successfully", prompt
             
     except Exception as e:
         print(f"Error in generate_image_gradio: {str(e)}")
         import traceback
         traceback.print_exc()
-        return [], f"Error: {str(e)}", prompt
+        update_generation_stats(success=False)
+        return [], f"Generation error: {str(e)}", prompt
+    
+    finally:
+        # Final cleanup
+        gc.collect()
+        force_mlx_cleanup()
+        print_memory_usage("After generation")
 
 def generate_image_controlnet_gradio(
-    prompt, control_image, model, seed, height, width, steps, guidance,
+    prompt, control_image, model, base_model, seed, height, width, steps, guidance,
     controlnet_strength, lora_files, metadata, save_canny,
-    *lora_scales, num_images=1, low_ram=False
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
 ):
     """
     Generate an image with controlnet guidance.
@@ -581,8 +817,10 @@ def generate_image_controlnet_gradio(
         force_mlx_cleanup()
 
 def generate_image_i2i_gradio(
-    prompt, input_image, model, seed, height, width, steps, guidance,
-    image_strength, lora_files, metadata, *lora_scales, num_images=1, low_ram=False
+    prompt, input_image, model, base_model, seed, height, width, steps, guidance,
+    image_strength, lora_files, metadata,
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
 ):
     """
     Generate an image based on an input image.
@@ -709,8 +947,10 @@ def generate_image_i2i_gradio(
         force_mlx_cleanup()
 
 def generate_image_in_context_lora_gradio(
-    prompt, reference_image, model, seed, height, width, steps, guidance,
-    lora_style, lora_files, metadata, *lora_scales, num_images=1, low_ram=False
+    prompt, reference_image, model, base_model, seed, height, width, steps, guidance,
+    lora_style, lora_files, metadata,
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
 ):
     """
     Generate an image with in-context LoRA.
@@ -879,3 +1119,210 @@ def generate_image_in_context_lora_gradio(
             del flux
         gc.collect()
         force_mlx_cleanup()
+
+
+
+def generate_image_kontext_gradio(
+    prompt, reference_image, seed, height, width, steps, guidance,
+    metadata, prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    vae_tiling=False, vae_tiling_split="horizontal", num_images=1, low_ram=False
+):
+    """
+    Generate an image with FLUX.1 Kontext for image editing via text instructions.
+    Kontext automatically uses the dev-kontext model and requires a reference image.
+    """
+    try:
+        print(f"\n--- Generating with FLUX.1 Kontext ---")
+        print(f"Reference image provided: {reference_image is not None}")
+        print(f"Prompt: {prompt}")
+        print(f"Guidance: {guidance} (recommended 2.0-4.0 for Kontext)")
+        
+        if not reference_image:
+            error_msg = "Reference image is required for Kontext generation"
+            print(f"Error: {error_msg}")
+            return [], error_msg, prompt
+        
+        # Handle dynamic prompts from file if specified
+        if prompt_file and os.path.exists(prompt_file):
+            from backend.managers.dynamic_prompts_manager import load_prompt_from_file
+            try:
+                loaded_prompt = load_prompt_from_file(prompt_file)
+                if loaded_prompt:
+                    prompt = loaded_prompt
+                    print(f"Loaded prompt from file: {prompt}")
+            except Exception as e:
+                print(f"Warning: Could not load prompt from file {prompt_file}: {e}")
+        
+        # Handle config from metadata if specified
+        if config_from_metadata and os.path.exists(config_from_metadata):
+            from backend.managers.metadata_config_manager import extract_config_from_metadata
+            try:
+                config_dict = extract_config_from_metadata(config_from_metadata)
+                if config_dict:
+                    # Apply extracted config (override current settings)
+                    height = config_dict.get('height', height)
+                    width = config_dict.get('width', width)
+                    steps = config_dict.get('steps', steps)
+                    guidance = config_dict.get('guidance', guidance)
+                    print(f"Applied config from metadata: {config_dict}")
+            except Exception as e:
+                print(f"Warning: Could not extract config from metadata {config_from_metadata}: {e}")
+        
+        # Validate and convert parameters
+        try:
+            height = int(height)
+            width = int(width)
+            steps_int = int(steps)
+            guidance_value = float(guidance)
+        except ValueError as e:
+            error_msg = f"Invalid parameter values: {str(e)}"
+            print(f"Error: {error_msg}")
+            return [], error_msg, prompt
+        
+        # Kontext-specific validation
+        if guidance_value < 1.0 or guidance_value > 6.0:
+            print(f"Warning: Guidance {guidance_value} is outside recommended range 2.0-4.0 for Kontext")
+        
+        # Process reference image
+        try:
+            if isinstance(reference_image, str) and os.path.exists(reference_image):
+                reference_pil = Image.open(reference_image).convert('RGB')
+            elif hasattr(reference_image, 'save'):  # PIL Image
+                reference_pil = reference_image.convert('RGB')
+            else:
+                error_msg = "Invalid reference image format"
+                print(f"Error: {error_msg}")
+                return [], error_msg, prompt
+        except Exception as e:
+            error_msg = f"Error processing reference image: {str(e)}"
+            print(f"Error: {error_msg}")
+            return [], error_msg, prompt
+        
+        # Auto-generate seed if not provided
+        if not seed:
+            seed = get_random_seed()
+        else:
+            try:
+                seed = int(seed)
+            except ValueError:
+                seed = get_random_seed()
+                print(f"Invalid seed, using random seed: {seed}")
+        
+        # Initialize Flux with dev-kontext model (Kontext automatically uses this model)
+        flux = get_or_create_flux(
+            model="dev-kontext",  # Kontext always uses dev-kontext model
+            lora_paths=None,      # Kontext doesn't use LoRA files
+            lora_scales=None,
+            low_ram=low_ram
+        )
+        
+        generated_images = []
+        filenames = []
+        
+        for i in range(num_images):
+            current_seed = seed + i if num_images > 1 else seed
+            print(f"Generating Kontext image {i+1}/{num_images} with seed {current_seed}")
+            
+            try:
+                # Generate image with Kontext
+                generated = flux.generate_image(
+                    seed=current_seed,
+                    prompt=prompt,
+                    config=Config(
+                        num_inference_steps=steps_int,
+                        height=height,
+                        width=width,
+                        guidance=guidance_value,
+                        init_image_strength=0.95  # Standard for Kontext editing
+                    ),
+                    init_image=reference_pil
+                )
+                
+                # Convert to PIL
+                if isinstance(generated, list) and len(generated) > 0:
+                    pil_image = generated[0]
+                else:
+                    pil_image = generated
+                
+                if not isinstance(pil_image, Image.Image):
+                    pil_image = Image.fromarray((pil_image * 255).astype(np.uint8))
+                
+                generated_images.append(pil_image)
+                
+                # Save image
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"kontext_{timestamp}_{current_seed}.png"
+                output_path = os.path.join(OUTPUT_DIR, filename)
+                pil_image.save(output_path)
+                filenames.append(filename)
+                
+                # Handle stepwise output if specified
+                if stepwise_output_dir:
+                    from backend.managers.stepwise_output_manager import save_stepwise_output
+                    try:
+                        save_stepwise_output(
+                            stepwise_output_dir, 
+                            pil_image, 
+                            current_seed, 
+                            steps_int,
+                            "kontext"
+                        )
+                    except Exception as e:
+                        print(f"Warning: Could not save stepwise output: {e}")
+                
+                # Save metadata if requested
+                if metadata:
+                    metadata_path = os.path.join(OUTPUT_DIR, f"kontext_{timestamp}_{current_seed}.json")
+                    metadata_dict = {
+                        "prompt": prompt,
+                        "seed": current_seed,
+                        "steps": steps_int,
+                        "guidance": guidance_value,
+                        "width": width,
+                        "height": height,
+                        "model": "dev-kontext",
+                        "generation_time": str(time.ctime()),
+                        "reference_image_used": True,
+                        "kontext_editing": True
+                    }
+                    
+                    # Add MFLUX v0.9.0 metadata
+                    if prompt_file:
+                        metadata_dict["prompt_file"] = prompt_file
+                    if config_from_metadata:
+                        metadata_dict["config_from_metadata"] = config_from_metadata
+                    if stepwise_output_dir:
+                        metadata_dict["stepwise_output_dir"] = stepwise_output_dir
+                    if vae_tiling:
+                        metadata_dict["vae_tiling"] = vae_tiling
+                        metadata_dict["vae_tiling_split"] = vae_tiling_split
+                    
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata_dict, f, indent=2)
+                
+                print(f"Generated Kontext image saved to {output_path}")
+                
+            except Exception as e:
+                print(f"Error generating Kontext image {i+1}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        if generated_images:
+            return generated_images, ", ".join(filenames), prompt
+        else:
+            return [], "Error: No images were generated", prompt
+            
+    except Exception as e:
+        print(f"Error in Kontext generation: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return [], f"Error: {str(e)}", prompt
+        
+    finally:
+        # Cleanup
+        if 'flux' in locals():
+            del flux
+        gc.collect()
+        force_mlx_cleanup()
+

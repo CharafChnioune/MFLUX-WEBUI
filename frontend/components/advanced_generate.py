@@ -44,6 +44,14 @@ def create_advanced_generate_tab():
                 label="Model",
                 value="schnell-4-bit"
             )
+            
+            base_model = gr.Dropdown(
+                choices=["None", "schnell", "dev"],
+                label="Base Model (--base-model)",
+                value="None",
+                info="Required for third-party HuggingFace models",
+                visible=False
+            )
 
             with gr.Row():
                 width = gr.Number(label="Width", value=576, precision=0)
@@ -142,6 +150,40 @@ def create_advanced_generate_tab():
                 with gr.Row():
                     metadata = gr.Checkbox(label="Export Metadata as JSON", value=False)
                     low_ram = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
+                
+                # New MFLUX v0.9.0 features
+                with gr.Accordion("🆕 MFLUX v0.9.0 Features", open=False):
+                    with gr.Row():
+                        prompt_file = gr.Textbox(
+                            label="Prompt File Path (--prompt-file)",
+                            placeholder="/path/to/prompts.txt or prompts.json",
+                            value=""
+                        )
+                        config_from_metadata = gr.Textbox(
+                            label="Config from Metadata (--config-from-metadata)",
+                            placeholder="/path/to/reference_image.png",
+                            value=""
+                        )
+                    
+                    with gr.Row():
+                        stepwise_output_dir = gr.Textbox(
+                            label="Stepwise Output Directory (--stepwise-image-output-dir)",
+                            placeholder="/path/to/stepwise/output",
+                            value=""
+                        )
+                    
+                    with gr.Row():
+                        vae_tiling = gr.Checkbox(
+                            label="Enable VAE Tiling (--vae-tiling)",
+                            value=False,
+                            info="Split VAE processing into tiles for memory efficiency"
+                        )
+                        vae_tiling_split = gr.Dropdown(
+                            label="VAE Tiling Split Direction (--vae-tiling-split)",
+                            choices=["horizontal", "vertical"],
+                            value="horizontal",
+                            info="Direction to split: horizontal (top/bottom) or vertical (left/right)"
+                        )
                     
             generate_button = gr.Button("Generate Image", variant='primary')
 
@@ -158,7 +200,11 @@ def create_advanced_generate_tab():
             output_filename = gr.Textbox(label="Saved Image Filenames")
 
         def generate_with_loras(*args):
-            prompt, model, seed, width, height, steps, guidance, lora_files, metadata, low_ram, auto_seeds, llm_type, llm_model, *lora_scales_and_num = args
+            # Extract parameters including new v0.9.0 features
+            prompt, model, base_model, seed, width, height, steps, guidance, lora_files, metadata, low_ram, auto_seeds, llm_type, llm_model = args[:14]
+            prompt_file, config_from_metadata, stepwise_output_dir, vae_tiling, vae_tiling_split = args[14:19]
+            lora_scales_and_num = args[19:]
+            
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -174,6 +220,7 @@ def create_advanced_generate_tab():
             return generate_image_gradio(
                 prompt,
                 model,
+                base_model if base_model != "None" else None,
                 seed,
                 width,
                 height,
@@ -183,6 +230,11 @@ def create_advanced_generate_tab():
                 metadata,
                 llm_model if llm_type == "Ollama" else None,
                 None,
+                prompt_file,
+                config_from_metadata,
+                stepwise_output_dir,
+                vae_tiling,
+                vae_tiling_split,
                 *valid_scales,
                 num_images=num_images,
                 low_ram=low_ram,
@@ -192,8 +244,9 @@ def create_advanced_generate_tab():
         generate_button.click(
             fn=generate_with_loras,
             inputs=[
-                prompt_advanced, model, seed, width, height, steps, guidance, lora_files,
+                prompt_advanced, model, base_model, seed, width, height, steps, guidance, lora_files,
                 metadata, low_ram, auto_seeds, llm_components_advanced[0], llm_components_advanced[1],
+                prompt_file, config_from_metadata, stepwise_output_dir, vae_tiling, vae_tiling_split,
                 *lora_scales, num_images
             ],
             outputs=[output_gallery, output_filename, prompt_advanced]

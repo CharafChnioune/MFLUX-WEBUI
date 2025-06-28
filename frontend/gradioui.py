@@ -22,9 +22,14 @@ from frontend.components.fill import create_fill_tab
 from frontend.components.depth import create_depth_tab
 from frontend.components.redux import create_redux_tab
 from frontend.components.upscale import create_upscale_tab
+from frontend.components.auto_seeds import create_auto_seeds_tab
+from frontend.components.battery_monitor import create_battery_tab
+from frontend.components.dynamic_prompts import create_dynamic_prompts_tab
+from frontend.components.config_manager import create_config_tab
 from frontend.components.catvton import create_catvton_tab
 from frontend.components.ic_edit import create_ic_edit_tab
 from frontend.components.concept_attention import create_concept_attention_tab
+from frontend.components.kontext import create_kontext_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -174,6 +179,22 @@ def create_ui():
 
             with gr.TabItem("IC-Edit"):
                 ic_edit_components = create_ic_edit_tab()
+
+            with gr.TabItem("Kontext"):
+                kontext_components = create_kontext_tab()
+
+            # --- Utility and Management tabs ---
+            with gr.TabItem("Auto Seeds"):
+                auto_seeds_components = create_auto_seeds_tab()
+
+            with gr.TabItem("Dynamic Prompts"):
+                dynamic_prompts_components = create_dynamic_prompts_tab()
+
+            with gr.TabItem("Battery Monitor"):
+                battery_components = create_battery_tab()
+
+            with gr.TabItem("Configuration"):
+                config_components = create_config_tab()
 
             with gr.TabItem("Model & LoRA Management"):
                 model_lora_management_components = create_model_lora_management_tab(

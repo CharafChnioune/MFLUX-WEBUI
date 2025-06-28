@@ -159,6 +159,47 @@ def create_in_context_lora_tab():
 
             metadata_icl = gr.Checkbox(label="Export Metadata as JSON", value=False)
             low_ram_icl = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
+            
+            # MFLUX v0.9.0 Features
+            with gr.Accordion("⚡ MFLUX v0.9.0 Features", open=False):
+                base_model_icl = gr.Dropdown(
+                    choices=["None", "schnell", "dev"],
+                    label="Base Model (for third-party HuggingFace models)",
+                    value="None"
+                )
+                prompt_file_icl = gr.Textbox(
+                    label="Prompt File Path (--prompt-file)",
+                    placeholder="Path to text/JSON file with prompts",
+                    value=""
+                )
+                config_from_metadata_icl = gr.Textbox(
+                    label="Config from Metadata (--config-from-metadata)", 
+                    placeholder="Path to image file to extract config from",
+                    value=""
+                )
+                stepwise_output_dir_icl = gr.Textbox(
+                    label="Stepwise Output Directory (--stepwise-image-output-dir)",
+                    placeholder="Directory to save intermediate steps",
+                    value=""
+                )
+                vae_tiling_icl = gr.Checkbox(
+                    label="VAE Tiling (--vae-tiling)",
+                    value=False,
+                    info="Enable tiling for large images to reduce memory usage"
+                )
+                vae_tiling_split_icl = gr.Dropdown(
+                    choices=["horizontal", "vertical"],
+                    label="VAE Tiling Split (--vae-tiling-split)",
+                    value="horizontal",
+                    visible=False
+                )
+                
+                vae_tiling_icl.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=[vae_tiling_icl],
+                    outputs=[vae_tiling_split_icl]
+                )
+            
             generate_button_icl = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -194,7 +235,9 @@ def create_in_context_lora_tab():
                 """)
 
         def generate_with_loras(*args):
-            prompt, reference_image, model, seed, height, width, steps, guidance, lora_style, lora_files, metadata, low_ram, *lora_scales_and_num = args
+            prompt, reference_image, model, base_model, seed, height, width, steps, guidance, lora_style, lora_files, metadata, low_ram = args[:13]
+            prompt_file, config_from_metadata, stepwise_output_dir, vae_tiling, vae_tiling_split = args[13:18]
+            lora_scales_and_num = args[18:]
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -211,6 +254,7 @@ def create_in_context_lora_tab():
                 prompt,
                 reference_image,
                 model,
+                base_model if base_model != "None" else None,
                 seed,
                 height,
                 width,
@@ -219,6 +263,11 @@ def create_in_context_lora_tab():
                 lora_style,
                 valid_loras,
                 metadata,
+                prompt_file,
+                config_from_metadata,
+                stepwise_output_dir,
+                vae_tiling,
+                vae_tiling_split,
                 *valid_scales,
                 num_images=num_images,
                 low_ram=low_ram
@@ -227,8 +276,10 @@ def create_in_context_lora_tab():
         generate_button_icl.click(
             fn=generate_with_loras,
             inputs=[
-                prompt, reference_image, model_icl, seed_icl, height_icl, width_icl, steps_icl,
+                prompt, reference_image, model_icl, base_model_icl, seed_icl, height_icl, width_icl, steps_icl,
                 guidance_icl, lora_style, lora_files_icl, metadata_icl, low_ram_icl,
+                prompt_file_icl, config_from_metadata_icl, stepwise_output_dir_icl, 
+                vae_tiling_icl, vae_tiling_split_icl,
                 *lora_scales_icl, num_images_icl
             ],
             outputs=[output_gallery_icl, output_message_icl, prompt]

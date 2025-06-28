@@ -191,6 +191,47 @@ def create_controlnet_tab():
             metadata_cn = gr.Checkbox(label="Export Metadata as JSON", value=False)
             save_canny = gr.Checkbox(label="Save Canny Edge Detection Image", value=False)
             low_ram_cn = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
+            
+            # MFLUX v0.9.0 Features
+            with gr.Accordion("⚡ MFLUX v0.9.0 Features", open=False):
+                base_model_cn = gr.Dropdown(
+                    choices=["None", "schnell", "dev"],
+                    label="Base Model (for third-party HuggingFace models)",
+                    value="None"
+                )
+                prompt_file_cn = gr.Textbox(
+                    label="Prompt File Path (--prompt-file)",
+                    placeholder="Path to text/JSON file with prompts",
+                    value=""
+                )
+                config_from_metadata_cn = gr.Textbox(
+                    label="Config from Metadata (--config-from-metadata)", 
+                    placeholder="Path to image file to extract config from",
+                    value=""
+                )
+                stepwise_output_dir_cn = gr.Textbox(
+                    label="Stepwise Output Directory (--stepwise-image-output-dir)",
+                    placeholder="Directory to save intermediate steps",
+                    value=""
+                )
+                vae_tiling_cn = gr.Checkbox(
+                    label="VAE Tiling (--vae-tiling)",
+                    value=False,
+                    info="Enable tiling for large images to reduce memory usage"
+                )
+                vae_tiling_split_cn = gr.Dropdown(
+                    choices=["horizontal", "vertical"],
+                    label="VAE Tiling Split (--vae-tiling-split)",
+                    value="horizontal",
+                    visible=False
+                )
+                
+                vae_tiling_cn.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=[vae_tiling_cn],
+                    outputs=[vae_tiling_split_cn]
+                )
+            
             generate_button_cn = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -206,7 +247,9 @@ def create_controlnet_tab():
             output_message_cn = gr.Textbox(label="Saved Image Filenames")
 
         def generate_with_loras(*args):
-            prompt, control_image, model, seed, height, width, steps, guidance, controlnet_strength, lora_files, metadata, save_canny, low_ram, *lora_scales_and_num = args
+            prompt, control_image, model, base_model, seed, height, width, steps, guidance, controlnet_strength, lora_files, metadata, save_canny, low_ram = args[:14]
+            prompt_file, config_from_metadata, stepwise_output_dir, vae_tiling, vae_tiling_split = args[14:19]
+            lora_scales_and_num = args[19:]
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -223,6 +266,7 @@ def create_controlnet_tab():
                 prompt,
                 control_image,
                 model,
+                base_model if base_model != "None" else None,
                 seed,
                 height,
                 width,
@@ -232,6 +276,11 @@ def create_controlnet_tab():
                 valid_loras,
                 metadata,
                 save_canny,
+                prompt_file,
+                config_from_metadata,
+                stepwise_output_dir,
+                vae_tiling,
+                vae_tiling_split,
                 *valid_scales,
                 num_images=num_images,
                 low_ram=low_ram
@@ -263,9 +312,11 @@ def create_controlnet_tab():
         generate_button_cn.click(
             fn=generate_with_loras,
             inputs=[
-                prompt, control_image, model_cn, seed_cn, height_cn, width_cn, 
+                prompt, control_image, model_cn, base_model_cn, seed_cn, height_cn, width_cn, 
                 steps_cn, guidance_cn, controlnet_strength, lora_files_cn, 
                 metadata_cn, save_canny, low_ram_cn,
+                prompt_file_cn, config_from_metadata_cn, stepwise_output_dir_cn, 
+                vae_tiling_cn, vae_tiling_split_cn,
                 *lora_scales_cn, num_images_cn
             ],
             outputs=[output_gallery_cn, output_message_cn, prompt, canny_notification]

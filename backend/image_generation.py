@@ -74,7 +74,7 @@ def parse_image_format(image_format):
         return (width, height)
     return (512, 512)
 
-def generate_image_gradio(prompt, model, seed, width, height, steps, guidance, lora_files, metadata, ollama_model, system_prompt, *lora_scales_and_num_images):
+def generate_image_gradio(prompt, model, base_model, seed, width, height, steps, guidance, lora_files, metadata, ollama_model, system_prompt, *lora_scales_and_num_images):
     """
     Uitgebreide methode met handmatige parameters
     """

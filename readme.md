@@ -1,19 +1,21 @@
-# MFLUX WebUI
+# MFLUX WebUI v0.9.0
 
 ![MFLUX WebUI Logo](logo.png)
 
-A powerful and user-friendly web interface for MFLUX, powered by Gradio.
+A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now with advanced workflow management, battery monitoring, dynamic prompts, and comprehensive configuration support!
 
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![MFLUX](https://img.shields.io/badge/MFLUX-v0.9.0-green)](https://github.com/filipstrand/mflux)
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.8.0** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools such as Fill, Depth, Redux, Upscale, CatVTON, IC-Edit, and Concept Attention.
+MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.0** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management, battery monitoring, and intelligent prompt processing.
 
 ## Features
 
+### Core Generation Features
 - 🖼️ Simple and advanced **text-to-image** generation
 - 🎨 **Image-to-Image** transformation
 - 🖌️ **Fill Tool (Inpaint/Outpaint)**
@@ -24,12 +26,21 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.8.0** image generatio
 - ✏️ **IC-Edit** in-context editing
 - 🧩 **Concept Attention** fine-grained prompt control
 - 🎛️ ControlNet support
-- 🧠 Multi-LoRA support & dynamic prompt files
-- ⚡ Quantization (3-,4-,6-,8-bit) & Low RAM mode
-- 📤 Metadata export & auto-seed
-- 🌈 User-friendly UI for beginners and experts
-- 🤖 Ollama integration for prompt enhancement
 - 🎯 **Dreambooth Fine-Tuning**
+
+### New v0.9.0 Features
+- 🔋 **Battery Monitor** - Smart generation control based on battery level
+- 🎲 **Dynamic Prompts** - Wildcard support and prompt variations
+- 🎯 **Auto Seeds** - Intelligent seed management and selection
+- ⚙️ **Configuration Manager** - Advanced config handling with presets
+- 📊 **Generation Workflow** - Comprehensive progress tracking and statistics
+- 🧠 Enhanced **Multi-LoRA** support with library path management
+- ⚡ Advanced **Quantization** (3-,4-,6-,8-bit) & Low RAM mode
+- 📤 Enhanced **Metadata export** with workflow information
+- 🔄 **Stepwise output** for generation progress visualization
+- 🤖 **Third-party HuggingFace model** support
+- 🌈 Modern tabbed UI for beginners and experts
+- 🤖 **Ollama integration** for prompt enhancement
 
 ## Installation
 
@@ -70,10 +81,45 @@ python webui.py
 
 Access the interface in your web browser at `http://localhost:7860`.
 
+### v0.9.0 Configuration
+
+After installation, you may want to configure the new v0.9.0 features:
+
+#### Environment Variables
+
+Set up optional environment variables for enhanced functionality:
+
+```bash
+export LORA_LIBRARY_PATH="/path/to/your/lora/models"  # Custom LoRA library location
+export MFLUX_CONFIG_PATH="/path/to/config/files"     # Custom config directory
+export MFLUX_BATTERY_MONITOR=true                    # Enable battery monitoring by default
+```
+
+#### Initial Setup
+
+1. **First Run**: Launch the WebUI and navigate to the **Configuration** tab
+2. **Battery Setup**: If using a laptop, configure the **Battery Monitor** tab with your preferred thresholds
+3. **Dynamic Prompts**: Set up your prompt categories in the **Dynamic Prompts** tab
+4. **Auto Seeds**: Configure seed management in the **Auto Seeds** tab
+5. **Presets**: Create and save your preferred configuration presets
+
+#### Optional Dependencies
+
+For full functionality, you may want to install optional dependencies:
+
+```bash
+# For advanced image processing
+pip install opencv-python scipy matplotlib
+
+# For development
+pip install black flake8 pytest
+```
+
 ### Interface Overview
 
-The MFLUX WebUI now contains the following tabs:
+The MFLUX WebUI v0.9.0 contains the following tabs:
 
+#### Core Generation Tabs
 1. **MFLUX Easy** – quick text-to-image generation  
 2. **Advanced Generate** – full control over generation parameters  
 3. **ControlNet** – guided generation with control images  
@@ -88,6 +134,13 @@ The MFLUX WebUI now contains the following tabs:
 12. **In-Context LoRA** – apply reference styles  
 13. **Dreambooth Fine-Tuning** – train custom models  
 14. **Model & LoRA Management** – download, quantize & manage models
+15. **Kontext** – context-aware generation
+
+#### New v0.9.0 Management Tabs
+16. **Auto Seeds** – intelligent seed management and auto-generation
+17. **Dynamic Prompts** – wildcard prompts, categories, and variations
+18. **Battery Monitor** – battery-aware generation control
+19. **Configuration** – advanced config management with presets
 
 ## Project Structure
 
@@ -148,6 +201,87 @@ The Image-to-Image tab allows you to transform existing images using new prompts
 - **LoRA Files**: Select LoRA files to use in transformation (if available).
 - **LoRA Scale**: Adjust the influence of the LoRA files.
 - **Export Metadata**: Option to export generation parameters as JSON.
+
+## New v0.9.0 Features
+
+### Auto Seeds Management
+
+The Auto Seeds tab provides intelligent seed management:
+
+- **Enable Auto Seeds**: Toggle automatic seed generation
+- **Current Pool**: View and manage the current seed collection
+- **Pool Size**: Configure how many seeds to maintain
+- **Generation Strategy**: Choose between random, sequential, or weighted selection
+- **Seed History**: Track previously used seeds and their results
+- **Export/Import**: Save and load seed collections
+- **Statistics**: View seed usage analytics and performance metrics
+
+### Dynamic Prompts
+
+The Dynamic Prompts tab enables advanced prompt processing:
+
+- **Enable Dynamic Prompts**: Toggle dynamic prompt processing
+- **Wildcard Support**: Use `{category}` syntax for random selections
+- **Prompt Variations**: Generate multiple variations from templates
+- **Categories Management**: Create and manage prompt categories
+- **Template Library**: Save and reuse prompt templates
+- **File Import/Export**: Load prompts from txt/json files
+- **Random Selection**: Configure randomization settings
+- **Prompt Testing**: Preview variations before generation
+
+**Example wildcards:**
+```
+A {adjective} {animal} in a {environment}, {style}
+```
+Where categories contain:
+- `adjective`: [beautiful, majestic, mysterious, elegant]
+- `animal`: [cat, wolf, eagle, dragon]
+- `environment`: [forest, mountain, ocean, city]
+- `style`: [digital art, oil painting, photograph]
+
+### Battery Monitor
+
+The Battery Monitor tab provides intelligent power management:
+
+- **Enable Monitoring**: Toggle battery-aware generation control
+- **Stop Threshold**: Set battery percentage to stop generation
+- **Pause Threshold**: Set battery percentage to pause generation
+- **Resume on AC**: Automatically resume when plugged in
+- **Notifications**: Enable desktop notifications for battery events
+- **Status Display**: Real-time battery level and charging status
+- **Generation History**: Track power consumption during generation
+- **Power Profile**: Optimize settings based on power source
+
+### Configuration Manager
+
+The Configuration Manager tab offers comprehensive settings control:
+
+- **Current Config**: View all active configuration settings
+- **Quick Settings**: Apply common configuration presets
+- **Config Sections**: Manage settings by category:
+  - Generation parameters
+  - System settings
+  - LoRA configuration
+  - Auto seeds settings
+  - Battery management
+  - Quantization options
+- **Presets**: Save and load custom configuration presets
+- **Import/Export**: Share configurations via JSON/YAML files
+- **Template Export**: Create configuration templates
+- **Validation**: Automatic config validation and error checking
+- **Reset Options**: Restore default settings
+
+### Enhanced Generation Workflow
+
+v0.9.0 introduces a comprehensive generation workflow system:
+
+- **Pre-generation Checks**: Validate settings before starting
+- **Progress Monitoring**: Real-time generation progress tracking
+- **Smart Pause/Resume**: Intelligent generation control
+- **Enhanced Metadata**: Comprehensive generation information
+- **Statistics Tracking**: Monitor generation performance
+- **Error Recovery**: Robust error handling and recovery
+- **Resource Management**: Optimized memory and GPU usage
 
 ### Dreambooth Fine-Tuning
 
@@ -247,6 +381,47 @@ MFLUX WebUI integrates Ollama for prompt enhancement:
 
 - Enable the "Enhance prompt with Ollama" option to automatically improve your prompts.
 - Adjust Ollama settings, including the model and system prompt, in the Ollama Settings section.
+
+## Changelog
+
+### v0.9.0 (Latest) - Major Feature Update
+
+#### New Features
+- 🔋 **Battery Monitor**: Smart power management for laptop users
+- 🎲 **Dynamic Prompts**: Wildcard support with categories and templates
+- 🎯 **Auto Seeds**: Intelligent seed management and selection
+- ⚙️ **Configuration Manager**: Advanced config handling with presets
+- 📊 **Generation Workflow**: Comprehensive progress tracking
+- 🔄 **Stepwise Output**: Real-time generation progress visualization
+- 🤖 **Third-party HuggingFace Model Support**: Expanded model compatibility
+- 📤 **Enhanced Metadata**: Workflow information in exports
+
+#### Improvements
+- Enhanced Multi-LoRA support with library path management
+- Advanced quantization options (3-,4-,6-,8-bit)
+- Improved error handling and recovery
+- Better resource management and memory optimization
+- Modern tabbed UI with better organization
+- Comprehensive statistics and analytics
+
+#### Technical Changes
+- Updated to MFLUX v0.9.0
+- New modular backend architecture
+- Enhanced workflow management system
+- Improved configuration validation
+- Better integration with external dependencies
+
+#### Bug Fixes
+- Fixed memory leaks in generation workflow
+- Improved stability with multiple simultaneous generations
+- Better error messages and user feedback
+- Enhanced cleanup and resource management
+
+### v0.8.0 - Previous Release
+- Base MFLUX WebUI functionality
+- Core generation features
+- LoRA and ControlNet support
+- Basic model management
 
 ## Contributing
 

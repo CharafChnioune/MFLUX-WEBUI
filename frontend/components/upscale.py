@@ -1,5 +1,5 @@
 import gradio as gr
-from backend.upscale_manager import upscale_manager
+from backend.upscale_manager import upscale_manager, upscale_image_gradio, batch_upscale_gradio, upscale_with_custom_dimensions_gradio
 
 def create_upscale_tab():
     """Create the Upscale tool tab for image upscaling"""
@@ -36,32 +36,31 @@ def create_upscale_tab():
                 
                 # Upscale settings
                 with gr.Row():
-                    scale_factor = gr.Radio(
+                    scale_factor = gr.Textbox(
                         label="Scale Factor",
-                        choices=[2, 3, 4],
-                        value=2,
-                        info="How much to increase the resolution"
+                        value="2x",
+                        placeholder="2x, 1.5x, 2048, auto",
+                        info="Scale factors (2x, 1.5x) or absolute pixels (1024) or 'auto' to preserve dimensions"
                     )
                     
                     custom_resolution = gr.Checkbox(
-                        label="Use Custom Resolution",
-                        value=False
+                        label="Mixed Dimensions",
+                        value=False,
+                        info="Combine scale factors and absolute values"
                     )
                 
                 with gr.Row(visible=False) as custom_res_row:
-                    target_width = gr.Number(
-                        label="Target Width",
-                        value=2048,
-                        precision=0,
-                        minimum=512,
-                        maximum=4096
+                    target_width = gr.Textbox(
+                        label="Width",
+                        value="auto",
+                        placeholder="2x, 1024, auto",
+                        info="Scale factor or absolute pixels"
                     )
-                    target_height = gr.Number(
-                        label="Target Height",
-                        value=2048,
-                        precision=0,
-                        minimum=512,
-                        maximum=4096
+                    target_height = gr.Textbox(
+                        label="Height",
+                        value="auto", 
+                        placeholder="2x, 1024, auto",
+                        info="Scale factor or absolute pixels"
                     )
                 
                 # Advanced options

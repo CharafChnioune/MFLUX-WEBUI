@@ -185,6 +185,47 @@ def create_image_to_image_tab():
 
             metadata_i2i = gr.Checkbox(label="Export Metadata as JSON", value=False)
             low_ram_i2i = gr.Checkbox(label="Low RAM Mode (reduces memory usage)", value=False)
+            
+            # MFLUX v0.9.0 Features
+            with gr.Accordion("⚡ MFLUX v0.9.0 Features", open=False):
+                base_model_i2i = gr.Dropdown(
+                    choices=["None", "schnell", "dev"],
+                    label="Base Model (for third-party HuggingFace models)",
+                    value="None"
+                )
+                prompt_file_i2i = gr.Textbox(
+                    label="Prompt File Path (--prompt-file)",
+                    placeholder="Path to text/JSON file with prompts",
+                    value=""
+                )
+                config_from_metadata_i2i = gr.Textbox(
+                    label="Config from Metadata (--config-from-metadata)", 
+                    placeholder="Path to image file to extract config from",
+                    value=""
+                )
+                stepwise_output_dir_i2i = gr.Textbox(
+                    label="Stepwise Output Directory (--stepwise-image-output-dir)",
+                    placeholder="Directory to save intermediate steps",
+                    value=""
+                )
+                vae_tiling_i2i = gr.Checkbox(
+                    label="VAE Tiling (--vae-tiling)",
+                    value=False,
+                    info="Enable tiling for large images to reduce memory usage"
+                )
+                vae_tiling_split_i2i = gr.Dropdown(
+                    choices=["horizontal", "vertical"],
+                    label="VAE Tiling Split (--vae-tiling-split)",
+                    value="horizontal",
+                    visible=False
+                )
+                
+                vae_tiling_i2i.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=[vae_tiling_i2i],
+                    outputs=[vae_tiling_split_i2i]
+                )
+            
             generate_button_i2i = gr.Button("Generate Image", variant='primary')
 
         with gr.Column():
@@ -200,7 +241,9 @@ def create_image_to_image_tab():
             output_message_i2i = gr.Textbox(label="Saved Image Filenames")
 
         def generate_with_loras(*args):
-            prompt, input_image, model, seed, height, width, steps, guidance, image_strength, lora_files, metadata, low_ram, *lora_scales_and_num = args
+            prompt, input_image, model, base_model, seed, height, width, steps, guidance, image_strength, lora_files, metadata, low_ram = args[:13]
+            prompt_file, config_from_metadata, stepwise_output_dir, vae_tiling, vae_tiling_split = args[13:18]
+            lora_scales_and_num = args[18:]
             num_images = lora_scales_and_num[-1]
             lora_scales = lora_scales_and_num[:-1]
             
@@ -217,6 +260,7 @@ def create_image_to_image_tab():
                 prompt,
                 input_image,
                 model,
+                base_model if base_model != "None" else None,
                 seed,
                 height,
                 width,
@@ -225,6 +269,11 @@ def create_image_to_image_tab():
                 image_strength,
                 valid_loras,
                 metadata,
+                prompt_file,
+                config_from_metadata,
+                stepwise_output_dir,
+                vae_tiling,
+                vae_tiling_split,
                 *valid_scales,
                 num_images=num_images,
                 low_ram=low_ram
@@ -233,8 +282,10 @@ def create_image_to_image_tab():
         generate_button_i2i.click(
             fn=generate_with_loras,
             inputs=[
-                prompt, input_image, model_i2i, seed_i2i, height_i2i, width_i2i, steps_i2i,
+                prompt, input_image, model_i2i, base_model_i2i, seed_i2i, height_i2i, width_i2i, steps_i2i,
                 guidance_i2i, image_strength, lora_files_i2i, metadata_i2i, low_ram_i2i,
+                prompt_file_i2i, config_from_metadata_i2i, stepwise_output_dir_i2i, 
+                vae_tiling_i2i, vae_tiling_split_i2i,
                 *lora_scales_i2i, num_images_i2i
             ],
             outputs=[output_gallery_i2i, output_message_i2i, prompt]
