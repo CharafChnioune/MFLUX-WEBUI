@@ -1,5 +1,8 @@
 import gradio as gr
-from backend.concept_attention_manager import concept_attention_manager
+import re
+from backend.concept_attention_manager import generate_concept_attention_gradio
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_concept_attention_tab():
     """Create the Concept Attention tab for fine-grained prompt control"""
@@ -21,6 +24,13 @@ def create_concept_attention_tab():
                     lines=4,
                     info="Use {concept:weight} syntax. Default weight is 1.0"
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="concept_attention", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                 
                 # Attention syntax helper
                 with gr.Accordion("📝 Attention Syntax Guide", open=True):
@@ -379,6 +389,27 @@ def create_concept_attention_tab():
                 num_images, save_metadata, low_ram_mode, quantize
             ],
             outputs=[output_gallery, status, generation_info]
+        )
+        
+        # Enhance prompt with LLM for concept attention
+        def concept_attention_enhance_prompt(p, t, m1, m2, sp):
+            """Enhanced prompt function for Concept Attention"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, None, tab_name="concept_attention")
+            except Exception as e:
+                print(f"Error enhancing prompt in concept_attention: {str(e)}")
+                return p
+        
+        enhance_prompt_btn.click(
+            concept_attention_enhance_prompt,
+            inputs=[
+                prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+            ],
+            outputs=prompt
         )
         
         compare_btn.click(

@@ -1,5 +1,7 @@
 import gradio as gr
-from backend.ic_edit_manager import ic_edit_manager
+from backend.ic_edit_manager import generate_ic_edit_gradio
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_ic_edit_tab():
     """Create the IC-Edit tab for in-context image editing"""
@@ -41,6 +43,14 @@ def create_ic_edit_tab():
                     lines=4,
                     visible=False
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="ic_edit", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_instruction_btn = gr.Button("🔮 Enhance instruction with LLM")
+                    enhance_full_prompt_btn = gr.Button("🔮 Enhance full prompt with LLM")
                 
                 model_name = gr.Dropdown(
                     label="Model",
@@ -277,6 +287,49 @@ def create_ic_edit_tab():
                 
             except Exception as e:
                 yield None, None, f"Error: {str(e)}", ""
+        
+        # Enhance prompts with LLM for ic_edit
+        def ic_edit_enhance_instruction(p, t, m1, m2, sp, ref_img):
+            """Enhanced instruction function for IC-Edit with reference image context"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, ref_img, tab_name="ic_edit_instruction")
+            except Exception as e:
+                print(f"Error enhancing instruction in ic_edit: {str(e)}")
+                return p
+        
+        def ic_edit_enhance_full_prompt(p, t, m1, m2, sp, ref_img):
+            """Enhanced full prompt function for IC-Edit with reference image context"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, ref_img, tab_name="ic_edit_full")
+            except Exception as e:
+                print(f"Error enhancing full prompt in ic_edit: {str(e)}")
+                return p
+        
+        enhance_instruction_btn.click(
+            ic_edit_enhance_instruction,
+            inputs=[
+                instruction,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                reference_image     # Reference image for context
+            ],
+            outputs=instruction
+        )
+        
+        enhance_full_prompt_btn.click(
+            ic_edit_enhance_full_prompt,
+            inputs=[
+                full_prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                reference_image     # Reference image for context
+            ],
+            outputs=full_prompt
+        )
         
         # Connect generation button
         generate_btn.click(

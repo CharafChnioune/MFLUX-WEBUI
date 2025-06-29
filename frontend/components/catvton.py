@@ -1,5 +1,7 @@
 import gradio as gr
-from backend.catvton_manager import catvton_manager
+from backend.catvton_manager import generate_catvton_gradio
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_catvton_tab():
     """Create the CatVTON tab for virtual try-on"""
@@ -45,6 +47,13 @@ def create_catvton_tab():
                     lines=3,
                     info="Automatic prompts are optimized for virtual try-on"
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="catvton", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                 
                 model_name = gr.Dropdown(
                     label="Model",
@@ -282,6 +291,31 @@ def create_catvton_tab():
                 
             except Exception as e:
                 yield None, None, f"Error: {str(e)}", ""
+        
+        # Enhance prompt with LLM for catvton
+        def catvton_enhance_prompt(p, t, m1, m2, sp, person_img, garment_img):
+            """Enhanced prompt function for CatVTON with person and garment context"""
+            try:
+                # Use person image as primary context for vision models
+                context_image = person_img if person_img else garment_img
+                return enhance_prompt(p, t, m1, m2, sp, context_image, tab_name="catvton")
+            except Exception as e:
+                print(f"Error enhancing prompt in catvton: {str(e)}")
+                return p
+        
+        enhance_prompt_btn.click(
+            catvton_enhance_prompt,
+            inputs=[
+                prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                person_image,       # Person image for context
+                garment_image       # Garment image for context
+            ],
+            outputs=prompt
+        )
         
         # Connect generation button
         generate_btn.click(

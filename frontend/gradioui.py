@@ -30,6 +30,7 @@ from frontend.components.catvton import create_catvton_tab
 from frontend.components.ic_edit import create_ic_edit_tab
 from frontend.components.concept_attention import create_concept_attention_tab
 from frontend.components.kontext import create_kontext_tab
+from frontend.components.canvas import create_canvas_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -135,6 +136,9 @@ def create_ui():
                 lora_files_simple = easy_mflux_components['lora_files']
                 model_simple = easy_mflux_components['model']
 
+            with gr.TabItem("🎨 Canvas"):
+                canvas_components = create_canvas_tab()
+                
             with gr.TabItem("Advanced Generate"):
                 advanced_generate_components = create_advanced_generate_tab()
                 lora_files = advanced_generate_components['lora_files']

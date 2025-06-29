@@ -1,5 +1,7 @@
 import gradio as gr
-from backend.redux_manager import redux_manager
+from backend.redux_manager import generate_redux_gradio
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_redux_tab():
     """Create the Redux tool tab for generating image variations"""
@@ -26,6 +28,13 @@ def create_redux_tab():
                     lines=2,
                     info="Leave empty to use automatic variation"
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="redux", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                 
                 model_name = gr.Dropdown(
                     label="Model",
@@ -222,6 +231,28 @@ def create_redux_tab():
                 
             except Exception as e:
                 yield None, f"Error: {str(e)}", ""
+        
+        # Enhance prompt with LLM for redux
+        def redux_enhance_prompt(p, t, m1, m2, sp, input_img):
+            """Enhanced prompt function for Redux with input image context"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, input_img, tab_name="redux")
+            except Exception as e:
+                print(f"Error enhancing prompt in redux: {str(e)}")
+                return p
+        
+        enhance_prompt_btn.click(
+            redux_enhance_prompt,
+            inputs=[
+                prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                input_image         # Input image for context
+            ],
+            outputs=prompt
+        )
         
         # Connect generation button
         generate_btn.click(

@@ -1,5 +1,7 @@
 import gradio as gr
 from backend.depth_manager import depth_manager
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_depth_tab():
     """Create the Depth tool tab for generating images from depth maps"""
@@ -25,6 +27,13 @@ def create_depth_tab():
                     placeholder="Describe the image you want to generate...",
                     lines=3
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="depth", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                 
                 model_name = gr.Dropdown(
                     label="Model",
@@ -215,6 +224,28 @@ def create_depth_tab():
                 
             except Exception as e:
                 yield None, f"Error: {str(e)}", ""
+        
+        # Enhance prompt with LLM for depth
+        def depth_enhance_prompt(p, t, m1, m2, sp, ref_img):
+            """Enhanced prompt function for Depth with reference image context"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, ref_img, tab_name="depth")
+            except Exception as e:
+                print(f"Error enhancing prompt in depth: {str(e)}")
+                return p
+        
+        enhance_prompt_btn.click(
+            depth_enhance_prompt,
+            inputs=[
+                prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                reference_image     # Reference image for context
+            ],
+            outputs=prompt
+        )
         
         # Connect generation button
         generate_btn.click(

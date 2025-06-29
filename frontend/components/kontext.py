@@ -2,6 +2,8 @@ import gradio as gr
 import os
 from pathlib import Path
 from backend.flux_manager import generate_image_kontext_gradio, get_random_seed
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_kontext_tab():
     """Create the FLUX.1 Kontext tab"""
@@ -21,6 +23,13 @@ def create_kontext_tab():
                         lines=3,
                         value=""
                     )
+                    
+                    # LLM Enhancement section
+                    with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                        llm_components = create_llm_settings(tab_name="kontext", parent_accordion=llm_section)
+                    
+                    with gr.Row():
+                        enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                     
                     reference_image = gr.Image(
                         label="Reference Image (Required)",
@@ -148,8 +157,30 @@ def create_kontext_tab():
     def update_seed():
         return get_random_seed()
     
+    # Enhance prompt with LLM for kontext
+    def kontext_enhance_prompt(p, t, m1, m2, sp, ref_img):
+        """Enhanced prompt function for Kontext with reference image context"""
+        try:
+            return enhance_prompt(p, t, m1, m2, sp, ref_img, tab_name="kontext")
+        except Exception as e:
+            print(f"Error enhancing prompt in kontext: {str(e)}")
+            return p
+    
     # Bind events
     random_seed_btn.click(update_seed, outputs=seed)
+    
+    enhance_prompt_btn.click(
+        kontext_enhance_prompt,
+        inputs=[
+            prompt,
+            llm_components[0],  # LLM type
+            llm_components[1],  # Ollama model
+            llm_components[4],  # MLX model
+            llm_components[2],  # System prompt
+            reference_image     # Reference image for context
+        ],
+        outputs=prompt
+    )
     
     generate_btn.click(
         generate_image_kontext_gradio,

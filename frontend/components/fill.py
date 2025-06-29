@@ -3,6 +3,8 @@ from backend.flux_manager import get_random_seed
 from backend.fill_manager import generate_fill_gradio
 from backend.model_manager import get_updated_models
 from backend.post_processing import update_guidance_visibility
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_fill_tab():
     """
@@ -39,6 +41,13 @@ def create_fill_tab():
                         placeholder="Describe what should appear in the filled area...",
                         lines=3
                     )
+                    
+                    # LLM Enhancement section
+                    with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                        llm_components = create_llm_settings(tab_name="fill", parent_accordion=llm_section)
+                    
+                    with gr.Row():
+                        enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                     
                     model = gr.Dropdown(
                         choices=get_updated_models(),
@@ -168,10 +177,35 @@ def create_fill_tab():
     def update_model_choices():
         return gr.Dropdown(choices=get_updated_models())
         
+    # Enhance prompt with LLM for fill
+    def fill_enhance_prompt(p, t, m1, m2, sp, input_img, mask_img):
+        """Enhanced prompt function for Fill with input image context"""
+        try:
+            # Use input image as context for vision models
+            context_image = input_img if input_img else mask_img
+            return enhance_prompt(p, t, m1, m2, sp, context_image, tab_name="fill")
+        except Exception as e:
+            print(f"Error enhancing prompt in fill: {str(e)}")
+            return p
+    
     # Random seed button
     random_seed_btn.click(
         fn=get_random_seed,
         outputs=seed
+    )
+    
+    enhance_prompt_btn.click(
+        fill_enhance_prompt,
+        inputs=[
+            prompt,
+            llm_components[0],  # LLM type
+            llm_components[1],  # Ollama model
+            llm_components[4],  # MLX model
+            llm_components[2],  # System prompt
+            input_image,        # Input image for context
+            mask_image          # Mask for additional context
+        ],
+        outputs=prompt
     )
     
     # Model change handler

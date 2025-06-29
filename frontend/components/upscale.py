@@ -1,5 +1,7 @@
 import gradio as gr
 from backend.upscale_manager import upscale_manager, upscale_image_gradio, batch_upscale_gradio, upscale_with_custom_dimensions_gradio
+from backend.prompts_manager import enhance_prompt
+from frontend.components.llmsettings import create_llm_settings
 
 def create_upscale_tab():
     """Create the Upscale tool tab for image upscaling"""
@@ -26,6 +28,13 @@ def create_upscale_tab():
                     lines=2,
                     info="Describing the image helps preserve details during upscaling"
                 )
+                
+                # LLM Enhancement section
+                with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
+                    llm_components = create_llm_settings(tab_name="upscale", parent_accordion=llm_section)
+                
+                with gr.Row():
+                    enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
                 
                 model_name = gr.Dropdown(
                     label="Model",
@@ -167,6 +176,13 @@ def create_upscale_tab():
                     placeholder="General description for all images...",
                     lines=2
                 )
+                
+                # LLM Enhancement for batch
+                with gr.Accordion("⚙️ Batch LLM Settings", open=False) as batch_llm_section:
+                    batch_llm_components = create_llm_settings(tab_name="upscale-batch", parent_accordion=batch_llm_section)
+                
+                with gr.Row():
+                    enhance_batch_prompt_btn = gr.Button("🔮 Enhance batch prompt with LLM")
                 batch_generate_btn = gr.Button("Start Batch Upscale", variant="primary")
                 batch_status = gr.Textbox(label="Batch Status", interactive=False)
         
@@ -345,6 +361,48 @@ def create_upscale_tab():
                 
             except Exception as e:
                 yield f"Error in batch processing: {str(e)}"
+        
+        # Enhance prompt with LLM for upscale
+        def upscale_enhance_prompt(p, t, m1, m2, sp, input_img):
+            """Enhanced prompt function for Upscale with input image context"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, input_img, tab_name="upscale")
+            except Exception as e:
+                print(f"Error enhancing prompt in upscale: {str(e)}")
+                return p
+        
+        def upscale_enhance_batch_prompt(p, t, m1, m2, sp):
+            """Enhanced prompt function for batch upscale"""
+            try:
+                return enhance_prompt(p, t, m1, m2, sp, None, tab_name="upscale-batch")
+            except Exception as e:
+                print(f"Error enhancing batch prompt in upscale: {str(e)}")
+                return p
+        
+        enhance_prompt_btn.click(
+            upscale_enhance_prompt,
+            inputs=[
+                prompt,
+                llm_components[0],  # LLM type
+                llm_components[1],  # Ollama model
+                llm_components[4],  # MLX model
+                llm_components[2],  # System prompt
+                input_image         # Input image for context
+            ],
+            outputs=prompt
+        )
+        
+        enhance_batch_prompt_btn.click(
+            upscale_enhance_batch_prompt,
+            inputs=[
+                batch_prompt,
+                batch_llm_components[0],  # LLM type
+                batch_llm_components[1],  # Ollama model
+                batch_llm_components[4],  # MLX model
+                batch_llm_components[2],  # System prompt
+            ],
+            outputs=batch_prompt
+        )
         
         # Connect generation buttons
         generate_btn.click(
