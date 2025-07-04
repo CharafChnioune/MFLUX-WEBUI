@@ -184,7 +184,7 @@ class ConfigManager:
         """Export a configuration template with comments"""
         template = {
             "_comment": "MFLUX WebUI Configuration File",
-            "_version": "0.9.0",
+            "_version": "0.9.1",
             "generation": {
                 "_comment": "Default generation settings",
                 "default_model": "dev",

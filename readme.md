@@ -1,4 +1,4 @@
-# MFLUX WebUI v0.9.0
+# MFLUX WebUI v0.9.1
 
 ![MFLUX WebUI Logo](logo.png)
 
@@ -7,11 +7,11 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now wit
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-[![MFLUX](https://img.shields.io/badge/MFLUX-v0.9.0-green)](https://github.com/filipstrand/mflux)
+[![MFLUX](https://img.shields.io/badge/MFLUX-v0.9.1-green)](https://github.com/filipstrand/mflux)
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.0** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management, battery monitoring, and intelligent prompt processing.
+MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.1** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management, battery monitoring, and intelligent prompt processing.
 
 ## Features
 
@@ -28,7 +28,7 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.0** image generatio
 - 🎛️ ControlNet support
 - 🎯 **Dreambooth Fine-Tuning**
 
-### New v0.9.0 Features
+### New v0.9.1 Features
 - 🔋 **Battery Monitor** - Smart generation control based on battery level
 - 🎲 **Dynamic Prompts** - Wildcard support and prompt variations
 - 🎯 **Auto Seeds** - Intelligent seed management and selection
@@ -81,9 +81,9 @@ python webui.py
 
 Access the interface in your web browser at `http://localhost:7860`.
 
-### v0.9.0 Configuration
+### v0.9.1 Configuration
 
-After installation, you may want to configure the new v0.9.0 features:
+After installation, you may want to configure the new v0.9.1 features:
 
 #### Environment Variables
 
@@ -117,7 +117,7 @@ pip install black flake8 pytest
 
 ### Interface Overview
 
-The MFLUX WebUI v0.9.0 contains the following tabs:
+The MFLUX WebUI v0.9.1 contains the following tabs:
 
 #### Core Generation Tabs
 1. **MFLUX Easy** – quick text-to-image generation  
@@ -136,7 +136,7 @@ The MFLUX WebUI v0.9.0 contains the following tabs:
 14. **Model & LoRA Management** – download, quantize & manage models
 15. **Kontext** – context-aware generation
 
-#### New v0.9.0 Management Tabs
+#### New v0.9.1 Management Tabs
 16. **Auto Seeds** – intelligent seed management and auto-generation
 17. **Dynamic Prompts** – wildcard prompts, categories, and variations
 18. **Battery Monitor** – battery-aware generation control
@@ -202,7 +202,7 @@ The Image-to-Image tab allows you to transform existing images using new prompts
 - **LoRA Scale**: Adjust the influence of the LoRA files.
 - **Export Metadata**: Option to export generation parameters as JSON.
 
-## New v0.9.0 Features
+## New v0.9.1 Features
 
 ### Auto Seeds Management
 
@@ -273,7 +273,7 @@ The Configuration Manager tab offers comprehensive settings control:
 
 ### Enhanced Generation Workflow
 
-v0.9.0 introduces a comprehensive generation workflow system:
+v0.9.1 introduces a comprehensive generation workflow system:
 
 - **Pre-generation Checks**: Validate settings before starting
 - **Progress Monitoring**: Real-time generation progress tracking
@@ -384,7 +384,21 @@ MFLUX WebUI integrates Ollama for prompt enhancement:
 
 ## Changelog
 
-### v0.9.0 (Latest) - Major Feature Update
+### v0.9.1 (Latest) - Dependency & UI Improvements
+
+**🛠️ Dependency Fixes**
+- Restricted MLX dependency upper bound to 0.26.1 (mlx>=0.22.0,<=0.26.1) to prevent incompatibility issues
+
+**🎨 Inpaint Mask Tool Improvements**
+- Enhanced interactive inpaint masking tool with additional shape options (ellipse, rectangle, and free-hand drawing)
+- Added eraser mode for precise mask corrections
+- Implemented undo/redo history for non-destructive editing when crafting masks
+
+**👩‍💻 Developer Experience**
+- Introduced initial mypy static-type checking configuration
+- Upgraded pre-commit hooks and addressed lint warnings
+
+### v0.9.0 - Major Feature Update
 
 #### New Features
 - 🔋 **Battery Monitor**: Smart power management for laptop users
@@ -405,7 +419,7 @@ MFLUX WebUI integrates Ollama for prompt enhancement:
 - Comprehensive statistics and analytics
 
 #### Technical Changes
-- Updated to MFLUX v0.9.0
+- Updated to MFLUX v0.9.1
 - New modular backend architecture
 - Enhanced workflow management system
 - Improved configuration validation

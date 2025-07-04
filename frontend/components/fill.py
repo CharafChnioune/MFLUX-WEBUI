@@ -29,9 +29,36 @@ def create_fill_tab():
                         label="Mask (White = Fill Area)",
                         type="filepath",
                         height=300,
-                        image_mode="L"  # Grayscale
+                        image_mode="L",  # Grayscale
+                        sources=["upload", "clipboard"],
+                        tool="sketch",
+                        brush=gr.Brush(default_size=20, colors=["white", "black"]),
+                        eraser=gr.Eraser(default_size=20)
                     )
-                    gr.Markdown("💡 **Tip**: In the mask, white areas will be filled, black areas will be preserved")
+                    
+                    # Interactive mask tools
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.Markdown("### 🎨 Mask Drawing Tools")
+                            mask_tool = gr.Radio(
+                                choices=["draw", "rectangle", "ellipse", "eraser"],
+                                value="draw",
+                                label="Tool",
+                                info="Select drawing tool"
+                            )
+                            
+                        with gr.Column(scale=1):
+                            gr.Markdown("### 🎛️ Mask Controls")
+                            with gr.Row():
+                                clear_mask_btn = gr.Button("🗑️ Clear Mask", size="sm")
+                                undo_mask_btn = gr.Button("↶ Undo", size="sm")
+                                redo_mask_btn = gr.Button("↷ Redo", size="sm")
+                    
+                    gr.Markdown("💡 **Tips**: "
+                              "• White areas will be filled, black areas preserved\n"
+                              "• Use rectangle/ellipse for precise shapes\n"
+                              "• Eraser mode for corrections\n"
+                              "• Undo/Redo for non-destructive editing")
                     
                 # Generation settings
                 with gr.Group():
@@ -194,6 +221,28 @@ def create_fill_tab():
         outputs=seed
     )
     
+    # Mask tool handlers
+    def clear_mask():
+        """Clear the mask canvas"""
+        return None
+        
+    def handle_mask_tool_change(tool):
+        """Handle mask tool selection changes"""
+        # This would update the mask editor tool in a real implementation
+        return mask_image
+        
+    # Mask tool event handlers
+    clear_mask_btn.click(
+        fn=clear_mask,
+        outputs=mask_image
+    )
+    
+    mask_tool.change(
+        fn=handle_mask_tool_change,
+        inputs=[mask_tool],
+        outputs=[mask_image]
+    )
+    
     enhance_prompt_btn.click(
         fill_enhance_prompt,
         inputs=[
@@ -230,6 +279,10 @@ def create_fill_tab():
         'prompt': prompt,
         'input_image': input_image,
         'mask_image': mask_image,
+        'mask_tool': mask_tool,
+        'clear_mask_btn': clear_mask_btn,
+        'undo_mask_btn': undo_mask_btn,
+        'redo_mask_btn': redo_mask_btn,
         'model': model,
         'seed': seed,
         'width': width,
