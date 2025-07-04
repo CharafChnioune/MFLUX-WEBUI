@@ -30,10 +30,7 @@ def create_fill_tab():
                         type="filepath",
                         height=300,
                         image_mode="L",  # Grayscale
-                        sources=["upload", "clipboard"],
-                        tool="sketch",
-                        brush=gr.Brush(default_size=20, colors=["white", "black"]),
-                        eraser=gr.Eraser(default_size=20)
+                        sources=["upload", "clipboard"]
                     )
                     
                     # Interactive mask tools
