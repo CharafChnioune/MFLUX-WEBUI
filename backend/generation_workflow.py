@@ -1,5 +1,5 @@
 """
-Generation workflow integration for MFLUX WebUI v0.9.1
+Generation workflow integration for MFLUX WebUI v0.9.3
 Integrates all new features like battery monitoring, auto-seeds, dynamic prompts, etc.
 """
 
@@ -162,7 +162,7 @@ class GenerationWorkflow:
             # Enhanced metadata
             enhanced_metadata = {
                 **metadata,
-                "mflux_version": "0.9.1",
+                "mflux_version": "0.9.3",
                 "generation_timestamp": time.time(),
                 "generation_time_iso": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
                 "auto_seeds_enabled": self.auto_seeds_manager.get_config()["enabled"],
