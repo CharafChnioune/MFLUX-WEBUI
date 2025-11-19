@@ -23,7 +23,6 @@ from frontend.components.depth import create_depth_tab
 from frontend.components.redux import create_redux_tab
 from frontend.components.upscale import create_upscale_tab
 from frontend.components.auto_seeds import create_auto_seeds_tab
-from frontend.components.battery_monitor import create_battery_tab
 from frontend.components.dynamic_prompts import create_dynamic_prompts_tab
 from frontend.components.config_manager import create_config_tab
 from frontend.components.catvton import create_catvton_tab
@@ -207,9 +206,6 @@ def create_ui():
 
             with gr.TabItem("Dynamic Prompts"):
                 dynamic_prompts_components = create_dynamic_prompts_tab()
-
-            with gr.TabItem("Battery Monitor"):
-                battery_components = create_battery_tab()
 
             with gr.TabItem("Configuration"):
                 config_components = create_config_tab()

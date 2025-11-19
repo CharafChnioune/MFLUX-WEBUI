@@ -396,7 +396,7 @@ def generate_image_gradio(
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before generation")
 
-        # 1. Pre-generation checks (battery, config validation, etc.)
+        # 1. Pre-generation checks (config validation, etc.)
         pre_checks = check_pre_generation()
         if not pre_checks["can_proceed"]:
             error_msg = "\n".join(pre_checks["errors"])

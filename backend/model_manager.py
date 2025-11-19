@@ -1,140 +1,249 @@
 import os
-import json
 from pathlib import Path
-from huggingface_hub import snapshot_download, HfApi, HfFolder
+from shutil import disk_usage
+from typing import Dict, List, Optional
+
 import gradio as gr
+from huggingface_hub import HfApi, HfFolder, snapshot_download
+
+# Layout/state docs referenced across the UI:
+# - gradiodocs/docs-blocks/blocks.md (consistent Blocks state)
+# - gradiodocs/guides-controlling-layout/controlling_layout.md (Row/Column ordering)
+# - gradiodocs/guides-interface-state/interface_state.md (shared state between tabs)
+
+BASE_MODEL_CHOICES = ["schnell", "dev", "krea-dev"]
+MODELS: Dict[str, "CustomModelConfig"] = {}
+
 
 class CustomModelConfig:
-    def __init__(self, model_name, alias, num_train_steps, max_sequence_length, base_arch="schnell"):
+    """Thin proxy to keep Flux + Qwen loaders happy inside the UI flow."""
+
+    def __init__(
+        self,
+        model_name: str,
+        alias: str,
+        num_train_steps: int,
+        max_sequence_length: int,
+        base_arch: str = "schnell",
+        local_dir: Optional[Path] = None,
+    ):
         self.model_name = model_name
         self.alias = alias
         self.num_train_steps = num_train_steps
         self.max_sequence_length = max_sequence_length
         self.base_arch = base_arch
-        self.supports_guidance = (base_arch == "dev")
-        self.custom_transformer_model = model_name  # Added for compatibility with mflux library
-        self.requires_sigma_shift = False  # Added for compatibility with RuntimeConfig
+        self.local_dir = Path(local_dir) if local_dir else None
+        self.supports_guidance = base_arch in {"dev", "krea-dev"}
+        self.custom_transformer_model = model_name  # compatibility shim
+        self.requires_sigma_shift = base_arch == "krea-dev"
 
-    def is_dev(self):
-        """Check if this is a dev model configuration."""
-        return self.base_arch == "dev"
-        
-    def x_embedder_input_dim(self):
-        """Return the input dimension for the x_embedder.
-        This method is required by the mflux library's Transformer implementation."""
+    def is_dev(self) -> bool:
+        return self.base_arch in {"dev", "krea-dev"}
+
+    def x_embedder_input_dim(self) -> int:
+        # Required by the mflux Transformer signature
         return 3072
 
     @staticmethod
-    def from_alias(alias):
+    def from_alias(alias: str) -> "CustomModelConfig":
         return get_custom_model_config(alias)
 
-MODELS = {
-    "dev": CustomModelConfig("AITRADER/MFLUXUI.1-dev", "dev", 1000, 512, "dev"),
-    "schnell": CustomModelConfig("AITRADER/MFLUXUI.1-schnell", "schnell", 1000, 256, "schnell"),
-    "dev-8-bit": CustomModelConfig("AITRADER/MFLUXUI.1-dev-8-bit", "dev-8-bit", 1000, 512, "dev"),
-    "dev-4-bit": CustomModelConfig("AITRADER/MFLUXUI.1-dev-4-bit", "dev-4-bit", 1000, 512, "dev"),
-    "dev-6-bit": CustomModelConfig("AITRADER/MFLUXUI.1-dev-6-bit", "dev-6-bit", 1000, 512, "dev"),
-    "dev-3-bit": CustomModelConfig("AITRADER/MFLUXUI.1-dev-3-bit", "dev-3-bit", 1000, 512, "dev"),
-    "schnell-8-bit": CustomModelConfig("AITRADER/MFLUXUI.1-schnell-8-bit", "schnell-8-bit", 1000, 256, "schnell"),
-    "schnell-4-bit": CustomModelConfig("AITRADER/MFLUXUI.1-schnell-4-bit", "schnell-4-bit", 1000, 256, "schnell"),
-    "schnell-6-bit": CustomModelConfig("AITRADER/MFLUXUI.1-schnell-6-bit", "schnell-6-bit", 1000, 256, "schnell"),
-    "schnell-3-bit": CustomModelConfig("AITRADER/MFLUXUI.1-schnell-3-bit", "schnell-3-bit", 1000, 256, "schnell"),
-}
 
-def get_custom_model_config(model_alias):
+def _register_default_models():
+    """Register official checkpoints plus quantized variants."""
+    official = [
+        ("schnell", "AITRADER/MFLUXUI.1-schnell", 256, "schnell"),
+        ("dev", "AITRADER/MFLUXUI.1-dev", 512, "dev"),
+        ("krea-dev", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
+        ("dev-krea", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
+    ]
+    for alias, repo, seq_len, base_arch in official:
+        MODELS[alias] = CustomModelConfig(repo, alias, 1000, seq_len, base_arch)
+
+    for alias, repo, seq_len, base_arch in official:
+        if alias == "dev-krea":
+            continue  # share canonical entry with krea-dev
+        for bits in ("3", "4", "6", "8"):
+            MODELS[f"{alias}-{bits}-bit"] = CustomModelConfig(
+                repo, f"{alias}-{bits}-bit", 1000, seq_len, base_arch
+            )
+
+
+_register_default_models()
+
+
+def get_custom_model_config(model_alias: str) -> CustomModelConfig:
     config = MODELS.get(model_alias)
     if config is None:
         raise ValueError(
-            f"Invalid model alias: {model_alias}. Available aliases: {', '.join(MODELS.keys())}"
+            f"Invalid model alias: {model_alias}. Available aliases: {', '.join(sorted(MODELS.keys()))}"
         )
     return config
 
-def get_updated_models():
-    """
-    Get a list of all available models, including predefined and custom models.
-    """
-    predefined_models = [
-        "schnell-4-bit", "dev-4-bit", 
-        "schnell-8-bit", "dev-8-bit", 
-        "schnell-6-bit", "dev-6-bit", 
-        "schnell-3-bit", "dev-3-bit",
-        "schnell", "dev"
+
+def get_base_model_choices() -> List[str]:
+    return BASE_MODEL_CHOICES.copy()
+
+
+def get_updated_models() -> List[str]:
+    """Combine official aliases with any folders under models/."""
+    ordered = [
+        "schnell",
+        "schnell-3-bit",
+        "schnell-4-bit",
+        "schnell-6-bit",
+        "schnell-8-bit",
+        "dev",
+        "dev-3-bit",
+        "dev-4-bit",
+        "dev-6-bit",
+        "dev-8-bit",
+        "krea-dev",
+        "krea-dev-3-bit",
+        "krea-dev-4-bit",
+        "krea-dev-6-bit",
+        "krea-dev-8-bit",
+        "dev-krea",
     ]
-    custom_models = [f.name for f in Path("models").iterdir() if f.is_dir()]
-    custom_models = [m for m in custom_models if m not in predefined_models]
-    custom_models.sort(key=str.lower)
-    all_models = predefined_models + custom_models
-    return all_models
+    predefined = [alias for alias in ordered if alias in MODELS]
+
+    custom_entries: List[str] = []
+    models_dir = Path("models")
+    models_dir.mkdir(parents=True, exist_ok=True)
+    for folder in models_dir.iterdir():
+        if not folder.is_dir():
+            continue
+        alias = folder.name
+        if alias in predefined:
+            continue
+        custom_entries.append(alias)
+        if alias not in MODELS:
+            MODELS[alias] = CustomModelConfig(
+                model_name=str(folder),
+                alias=alias,
+                num_train_steps=1000,
+                max_sequence_length=512,
+                base_arch="schnell",
+                local_dir=folder,
+            )
+
+    custom_entries.sort(key=str.lower)
+    return predefined + custom_entries
+
 
 def save_quantized_model_gradio(model_name, quantize_bits):
     """
-    Save a quantized version of a model.
+    Legacy shim retained so older layouts don't crash. The real quantization UI
+    now lives in the exporter section.
     """
-    try:
-        if not model_name or any(model_name.endswith(f"-{bits}-bit") for bits in ["3", "4", "6", "8"]):
-            return gr.update(), gr.update(), gr.update(), "Error: Invalid model name"
+    warning = (
+        "Quantization moved into the Export section. Refresh the page to load the new workflow."
+    )
+    print(warning)
+    model_choices = get_model_choices()
+    return (
+        model_choices,
+        model_choices,
+        model_choices,
+        model_choices,
+        model_choices,
+        model_name,
+        warning,
+    )
 
-        new_alias = f"{model_name}-{quantize_bits}-bit"
-        if new_alias in MODELS:
-            return gr.update(), gr.update(), gr.update(), f"Error: Model {new_alias} already exists"
 
-        source_config = get_custom_model_config(model_name)
-        new_config = CustomModelConfig(
-            source_config.model_name,
-            new_alias,
-            source_config.num_train_steps,
-            source_config.max_sequence_length,
-            source_config.base_arch
-        )
-        MODELS[new_alias] = new_config
+def register_local_model(alias: str, model_name: str, base_arch: str, target_dir: Path):
+    MODELS[alias] = CustomModelConfig(
+        model_name=model_name,
+        alias=alias,
+        num_train_steps=1000,
+        max_sequence_length=512 if base_arch != "schnell" else 256,
+        base_arch=base_arch,
+        local_dir=target_dir,
+    )
+    return get_model_choices()
 
-        updated_models = get_updated_models()
-        return (
-            gr.update(choices=updated_models),
-            gr.update(choices=updated_models),
-            gr.update(choices=updated_models),
-            f"Successfully created quantized model: {new_alias}"
-        )
 
-    except Exception as e:
-        error_message = f"Error creating quantized model: {str(e)}"
-        print(f"Error: {error_message}")
-        return gr.update(), gr.update(), gr.update(), error_message
+def resolve_local_path(alias: str) -> Optional[Path]:
+    config = MODELS.get(alias)
+    if config and config.local_dir and config.local_dir.exists():
+        return config.local_dir
+    candidate = Path("models") / alias
+    if candidate.exists():
+        if config:
+            config.local_dir = candidate
+        return candidate
+    return None
 
-def download_and_save_model(hf_model_name, alias, num_train_steps, max_sequence_length, api_key, base_arch="schnell"):
+
+def download_and_save_model(
+    hf_model_name,
+    alias,
+    num_train_steps,
+    max_sequence_length,
+    api_key,
+    base_arch="schnell",
+):
     """
     Download a model from Hugging Face and save it locally.
     """
     try:
         login_result = login_huggingface(api_key)
         if "Error" in login_result:
-            # Return None for all model dropdowns and the error message
             return None, None, None, None, None, f"HF Login failed: {login_result}"
 
-        model_dir = os.path.join("models", alias)
-        os.makedirs(model_dir, exist_ok=True)
+        model_dir = Path("models") / alias
+        model_dir.mkdir(parents=True, exist_ok=True)
 
-        downloaded_files = snapshot_download(
-            repo_id=hf_model_name, 
-            local_dir=model_dir, 
-            use_auth_token=api_key
+        stat = disk_usage(model_dir.parent)
+        if stat.free < 8 * 1024**3:
+            return None, None, None, None, None, "Error: Not enough free disk space to download model"
+
+        snapshot_download(
+            repo_id=hf_model_name,
+            local_dir=str(model_dir),
+            use_auth_token=api_key,
         )
 
-        new_config = CustomModelConfig(hf_model_name, alias, num_train_steps, max_sequence_length, base_arch)
-        MODELS[alias] = new_config
+        MODELS[alias] = CustomModelConfig(
+            hf_model_name,
+            alias,
+            num_train_steps,
+            max_sequence_length,
+            base_arch,
+            local_dir=model_dir,
+        )
 
-        # Get updated model choices for all dropdowns
         model_choices = get_model_choices()
-        
         print(f"Model {hf_model_name} successfully downloaded and saved as {alias}")
-        # Return updated model choices for all 5 dropdowns and success message
-        return model_choices, model_choices, model_choices, model_choices, model_choices, "Success"
+        return (
+            model_choices,
+            model_choices,
+            model_choices,
+            model_choices,
+            model_choices,
+            "Success",
+        )
 
     except Exception as e:
         error_message = f"Error downloading model: {str(e)}"
         print(f"Error: {error_message}")
-        # Return None for all model dropdowns and the error message
         return None, None, None, None, None, error_message
+
+
+def normalize_base_model_choice(choice: Optional[str]) -> Optional[str]:
+    """
+    Normalize --base-model dropdown values from the UI so backend helpers can
+    safely inject overrides. (Docs: gradiodocs/guides-interface-state/interface_state.md)
+    """
+    if choice is None:
+        return None
+    if isinstance(choice, str):
+        normalized = choice.strip().lower()
+        if normalized in {"", "none", "auto"}:
+            return None
+    return choice
+
 
 def login_huggingface(api_key):
     """
@@ -143,32 +252,32 @@ def login_huggingface(api_key):
     try:
         if not api_key:
             return "Error: API key is missing"
-        
+
         HfFolder.save_token(api_key)
         api = HfApi()
-        
+
         try:
             api.whoami()
             return "Successfully logged in to Hugging Face"
-        except Exception as e:
-            return f"Error validating credentials: {str(e)}"
-        
-    except Exception as e:
-        return f"Error logging in to Hugging Face: {str(e)}"
+        except Exception as exc:
+            return f"Error validating credentials: {str(exc)}"
+
+    except Exception as exc:
+        return f"Error logging in to Hugging Face: {str(exc)}"
+
 
 def update_guidance_visibility(model):
     """
-    Update de zichtbaarheid van de guidance slider op basis van het model.
-    Voor dev modellen is guidance altijd zichtbaar, voor schnell modellen 
-    is het wel zichtbaar maar optioneel.
+    Ensure guidance controls follow docs guidance for interactive components
+    (gradiodocs/guides-key-component-concepts/gradio_components_the_key_concepts.md).
     """
     is_dev = "dev" in model
-    return gr.update(visible=True, label="Guidance Scale (required for dev models)" if is_dev else "Guidance Scale (optional)")
+    return gr.update(
+        visible=True,
+        label="Guidance Scale (required for dev models)" if is_dev else "Guidance Scale (optional)",
+    )
+
 
 def get_model_choices():
-    """
-    Get model choices for Gradio dropdowns.
-    This function wraps get_updated_models() to provide model choices for UI components.
-    """
     models = get_updated_models()
     return gr.update(choices=models) if models else gr.update()

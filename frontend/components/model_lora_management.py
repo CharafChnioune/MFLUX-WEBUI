@@ -2,7 +2,7 @@ import gradio as gr
 from backend.model_manager import (
     get_updated_models,
     download_and_save_model,
-    save_quantized_model_gradio
+    get_base_model_choices,
 )
 from backend.huggingface_manager import (
     download_lora_model_huggingface,
@@ -127,8 +127,8 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, m
         with gr.Column(scale=2):
             hf_model_name = gr.Textbox(label="Hugging Face Model Name")
             alias = gr.Textbox(label="Model Alias")
-            base_arch = gr.Radio(
-                choices=["schnell", "dev"],
+            base_arch = gr.Dropdown(
+                choices=get_base_model_choices(),
                 label="Base Architecture (for Third-Party models)",
                 value="schnell"
             )
@@ -138,23 +138,62 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, m
             download_button = gr.Button("Download and Add Model", variant='primary')
             download_output = gr.Textbox(label="Download Status", lines=3)
 
-    gr.Markdown("## Quantize Model")
+    gr.Markdown("## Quantize / Export Model")
+    with gr.Column():
+        quant_source_model = gr.Dropdown(
+            choices=get_updated_models(),
+            label="Source Model",
+            value="dev",
+            allow_custom_value=True,
+            info="Select any registered model or type a Hugging Face repo ID.",
+        )
+        quant_new_alias = gr.Textbox(
+            label="Register As (alias)",
+            placeholder="e.g. dev-4bit-custom",
+        )
+        quant_output_dir = gr.Textbox(
+            label="Destination Directory",
+            value="models/",
+            placeholder="/absolute/path/to/export",
+        )
     with gr.Row():
-        with gr.Column(scale=2):
-            model_quant = gr.Dropdown(
-                choices=[m for m in get_updated_models() 
-                        if not any(m.endswith(f"-{bits}-bit") for bits in ["3", "4", "6", "8"])],
-                label="Model to Quantize",
-                value="dev"
+        quant_bits = gr.Radio(
+            choices=["16", "8", "6", "4", "3"],
+            value="8",
+            label="Quantize Bits",
+        )
+        quant_base_model = gr.Dropdown(
+            choices=["Auto"] + get_base_model_choices(),
+            value="Auto",
+            label="Base Model (--base-model)",
+        )
+
+    with gr.Accordion("LoRA Baking (optional)", open=False):
+        quant_lora_files = gr.Dropdown(
+            choices=get_lora_choices(),
+            multiselect=True,
+            label="LoRA Files",
+        )
+        quant_lora_scales = [
+            gr.Slider(
+                minimum=0.0,
+                maximum=2.0,
+                step=0.01,
+                value=1.0,
+                label=f"LoRA Weight {idx + 1}",
+                visible=False,
             )
-            quantize_level = gr.Radio(
-                choices=["3", "4", "6", "8"], 
-                label="Quantize Level", 
-                value="8"
-            )
-        with gr.Column(scale=1):
-            save_button = gr.Button("Save Quantized Model", variant='primary')
-            save_output = gr.Textbox(label="Quantization Output", lines=3)
+            for idx in range(MAX_LORAS)
+        ]
+        quant_lora_files.change(
+            fn=update_lora_scales,
+            inputs=[quant_lora_files],
+            outputs=quant_lora_scales,
+        )
+
+    quantize_button = gr.Button("Start Quantization", variant='primary')
+    quant_status = gr.Textbox(label="Quantization Status", lines=2)
+    quant_logs = gr.Textbox(label="Exporter Logs", lines=4)
 
     gr.Markdown("## Download Ollama Model")
     with gr.Row():
@@ -217,17 +256,45 @@ def create_model_lora_management_tab(model_simple, model, model_cn, model_i2i, m
         outputs=[model_simple, model, model_cn, model_i2i, model_icl, download_output]
     )
 
-    save_button.click(
-        fn=save_quantized_model_gradio,
-        inputs=[model_quant, quantize_level],
-        outputs=[model_simple, model, model_cn, model_i2i, model_icl, model_quant, save_output]
+    def _run_quantization(
+        source_model_val,
+        new_alias_val,
+        output_dir_val,
+        bits_val,
+        base_model_val,
+        lora_files_val,
+        *scale_vals,
+    ):
+        return quantize_model(
+            source_model_val,
+            new_alias_val,
+            output_dir_val,
+            bits_val,
+            base_model_val,
+            lora_files_val,
+            scale_vals,
+        )
+
+    quantize_button.click(
+        fn=_run_quantization,
+        inputs=[
+            quant_source_model,
+            quant_new_alias,
+            quant_output_dir,
+            quant_bits,
+            quant_base_model,
+            quant_lora_files,
+            *quant_lora_scales,
+        ],
+        outputs=[model_simple, model, model_cn, model_i2i, model_icl, quant_status, quant_logs],
     )
 
     return {
-        'model_quant': model_quant,
         'lora_download_status': lora_download_status,
         'download_output': download_output,
-        'save_output': save_output,
+        'quant_status': quant_status,
+        'quant_logs': quant_logs,
         'ollama_download_status': ollama_download_status,
         'mlx_download_status': mlx_download_status
-    } 
+    }
+from backend.export_manager import quantize_model

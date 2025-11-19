@@ -1,296 +1,167 @@
 import gradio as gr
-from backend.flux_manager import get_random_seed
+from PIL import Image
+
 from backend.fill_manager import generate_fill_gradio
-from backend.model_manager import get_updated_models
-from backend.post_processing import update_guidance_visibility
+from backend.model_manager import get_base_model_choices
 from backend.prompts_manager import enhance_prompt
 from frontend.components.llmsettings import create_llm_settings
 
+# Layout references:
+# - gradiodocs/docs-image/image.md (sketch tool & accessibility notes)
+# - gradiodocs/guides-controlling-layout (Row/Column usage)
+
+
+def _blank_mask(size: int = 1024) -> Image.Image:
+    return Image.new("L", (size, size), 0)
+
+
 def create_fill_tab():
-    """
-    Create the Fill (Inpaint/Outpaint) tab interface
-    """
-    with gr.Column():
-        with gr.Group():
-            gr.Markdown("# 🎨 Fill Tool (Inpaint/Outpaint)")
-            gr.Markdown("Use the Fill tool to inpaint (fill in) or outpaint (extend) images. Upload an image and a mask to specify which areas to fill.")
-            
+    with gr.TabItem("Fill"):
+        gr.Markdown(
+            "### 🎨 Fill (Inpaint & Outpaint)\n"
+            "Upload an image, paint a mask, and let Flux Fill regenerate the masked region."
+        )
+
         with gr.Row():
             with gr.Column(scale=1):
-                # Input images
-                with gr.Group():
-                    gr.Markdown("### Input Images")
-                    input_image = gr.Image(
-                        label="Original Image",
-                        type="filepath",
-                        height=300
-                    )
-                    mask_image = gr.Image(
-                        label="Mask (White = Fill Area)",
-                        type="filepath",
-                        height=300,
-                        image_mode="L",  # Grayscale
-                        sources=["upload", "clipboard"]
-                    )
-                    
-                    # Interactive mask tools
-                    with gr.Row():
-                        with gr.Column(scale=1):
-                            gr.Markdown("### 🎨 Mask Drawing Tools")
-                            mask_tool = gr.Radio(
-                                choices=["draw", "rectangle", "ellipse", "eraser"],
-                                value="draw",
-                                label="Tool",
-                                info="Select drawing tool"
-                            )
-                            
-                        with gr.Column(scale=1):
-                            gr.Markdown("### 🎛️ Mask Controls")
-                            with gr.Row():
-                                clear_mask_btn = gr.Button("🗑️ Clear Mask", size="sm")
-                                undo_mask_btn = gr.Button("↶ Undo", size="sm")
-                                redo_mask_btn = gr.Button("↷ Redo", size="sm")
-                    
-                    gr.Markdown("💡 **Tips**: "
-                              "• White areas will be filled, black areas preserved\n"
-                              "• Use rectangle/ellipse for precise shapes\n"
-                              "• Eraser mode for corrections\n"
-                              "• Undo/Redo for non-destructive editing")
-                    
-                # Generation settings
-                with gr.Group():
-                    gr.Markdown("### Generation Settings")
-                    prompt = gr.Textbox(
-                        label="Prompt",
-                        placeholder="Describe what should appear in the filled area...",
-                        lines=3
-                    )
-                    
-                    # LLM Enhancement section
-                    with gr.Accordion("⚙️ LLM Settings", open=False) as llm_section:
-                        llm_components = create_llm_settings(tab_name="fill", parent_accordion=llm_section)
-                    
-                    with gr.Row():
-                        enhance_prompt_btn = gr.Button("🔮 Enhance prompt with LLM")
-                    
-                    model = gr.Dropdown(
-                        choices=get_updated_models(),
-                        value="dev-8-bit",
-                        label="Model",
-                        interactive=True
-                    )
-                    
-                    with gr.Row():
-                        seed = gr.Textbox(
-                            label="Seed", 
-                            value="random",
-                            placeholder="Enter seed or 'random'"
-                        )
-                        random_seed_btn = gr.Button("🎲", elem_classes=["refresh-button"])
-                        
-                    with gr.Row():
-                        width = gr.Slider(
-                            minimum=256,
-                            maximum=1536,
-                            value=512,
-                            step=64,
-                            label="Width",
-                            info="Output width (must be multiple of 64)"
-                        )
-                        height = gr.Slider(
-                            minimum=256,
-                            maximum=1536,
-                            value=512,
-                            step=64,
-                            label="Height",
-                            info="Output height (must be multiple of 64)"
-                        )
-                        
-                    steps = gr.Slider(
-                        minimum=1,
-                        maximum=50,
-                        value=25,
-                        step=1,
-                        label="Steps",
-                        info="More steps = better quality but slower"
-                    )
-                    
-                    guidance = gr.Slider(
-                        minimum=0,
-                        maximum=50,
-                        value=30,
-                        step=0.5,
-                        label="Guidance Scale",
-                        info="Fill works best with high guidance (20-40)"
-                    )
-                    
-                    num_images = gr.Slider(
-                        minimum=1,
-                        maximum=4,
-                        value=1,
-                        step=1,
-                        label="Number of Images"
-                    )
-                    
-                # Advanced options
-                with gr.Accordion("Advanced Options", open=False):
-                    metadata = gr.Checkbox(
-                        label="Save Metadata",
-                        value=True,
-                        info="Save generation parameters as JSON"
-                    )
-                    
-                    low_ram = gr.Checkbox(
-                        label="Low RAM Mode (8-bit Quantization)",
-                        value=False,
-                        info="Use less memory but may reduce quality"
-                    )
-                    
-                generate_btn = gr.Button("🎨 Generate Fill", variant="primary", size="lg")
-                
+                base_model = gr.Dropdown(
+                    label="Base Model (--base-model)",
+                    choices=["Auto"] + get_base_model_choices(),
+                    value="Auto",
+                )
+                original_image = gr.Image(
+                    label="Original Image",
+                    type="filepath",
+                    height=320,
+                )
+                mask_image = gr.Image(
+                    label="Mask (white = fill area)",
+                    type="pil",
+                    image_mode="L",
+                    height=320,
+                    value=_blank_mask(),
+                )
+                reset_mask_btn = gr.Button("Reset Mask", variant="secondary", size="sm")
+
+                prompt = gr.Textbox(
+                    label="Prompt",
+                    placeholder="Describe what should appear where the mask is painted…",
+                    lines=3,
+                )
+
+                with gr.Accordion("⚙️ Prompt Helper", open=False) as llm_acc:
+                    llm_components = create_llm_settings("fill", llm_acc)
+                enhance_btn = gr.Button("🔮 Enhance Prompt")
+
+                seed = gr.Textbox(label="Seed", placeholder="Leave blank for random")
+                width = gr.Slider(256, 1536, value=1024, step=64, label="Width")
+                height = gr.Slider(256, 1536, value=1024, step=64, label="Height")
+                steps = gr.Slider(5, 50, value=25, step=1, label="Steps")
+                guidance = gr.Slider(5, 40, value=30, step=0.5, label="Guidance")
+                num_images = gr.Slider(1, 4, value=1, step=1, label="Variations")
+
+                with gr.Row():
+                    metadata = gr.Checkbox(label="Save Metadata", value=True)
+                    low_ram = gr.Checkbox(label="Low RAM Mode (8-bit)", value=False)
+
+                generate_btn = gr.Button("Generate Fill", variant="primary")
+
             with gr.Column(scale=1):
-                # Output section
-                with gr.Group():
-                    gr.Markdown("### Generated Images")
-                    output_gallery = gr.Gallery(
-                        label="Output",
-                        show_label=False,
-                        elem_id="fill_gallery",
-                        columns=2,
-                        rows=2,
-                        height="auto"
-                    )
-                    
-                    status_text = gr.Textbox(
-                        label="Status",
-                        interactive=False,
-                        show_label=True
-                    )
-                    
-                    enhanced_prompt_display = gr.Textbox(
-                        label="Used Prompt",
-                        interactive=False,
-                        visible=True
-                    )
-                    
-        # Info section
-        with gr.Accordion("ℹ️ How to Use Fill Tool", open=False):
-            gr.Markdown("""
-            ### Fill Tool Guide
-            
-            The Fill tool allows you to:
-            - **Inpaint**: Remove unwanted objects or fill in missing parts
-            - **Outpaint**: Extend images beyond their original boundaries
-            
-            **Steps:**
-            1. Upload your original image
-            2. Create or upload a mask image where:
-                - White pixels = areas to fill/generate
-                - Black pixels = areas to preserve
-            3. Write a prompt describing what should appear in the filled areas
-            4. Adjust settings and generate
-            
-            **Tips:**
-            - Use high guidance values (20-40) for best results
-            - For outpainting, create a mask that extends beyond the image borders
-            - Be specific in your prompt about what should appear
-            - The fill model automatically downloads on first use (~4GB)
-            """)
-            
-    # Event handlers
-    def update_model_choices():
-        return gr.Dropdown(choices=get_updated_models())
-        
-    # Enhance prompt with LLM for fill
-    def fill_enhance_prompt(p, t, m1, m2, sp, input_img, mask_img):
-        """Enhanced prompt function for Fill with input image context"""
-        try:
-            # Use input image as context for vision models
-            context_image = input_img if input_img else mask_img
-            return enhance_prompt(p, t, m1, m2, sp, context_image, tab_name="fill")
-        except Exception as e:
-            print(f"Error enhancing prompt in fill: {str(e)}")
-            return p
-    
-    # Random seed button
-    random_seed_btn.click(
-        fn=get_random_seed,
-        outputs=seed
-    )
-    
-    # Mask tool handlers
-    def clear_mask():
-        """Clear the mask canvas"""
-        return None
-        
-    def handle_mask_tool_change(tool):
-        """Handle mask tool selection changes"""
-        # This would update the mask editor tool in a real implementation
-        return mask_image
-        
-    # Mask tool event handlers
-    clear_mask_btn.click(
-        fn=clear_mask,
-        outputs=mask_image
-    )
-    
-    mask_tool.change(
-        fn=handle_mask_tool_change,
-        inputs=[mask_tool],
-        outputs=[mask_image]
-    )
-    
-    enhance_prompt_btn.click(
-        fill_enhance_prompt,
-        inputs=[
-            prompt,
-            llm_components[0],  # LLM type
-            llm_components[1],  # Ollama model
-            llm_components[4],  # MLX model
-            llm_components[2],  # System prompt
-            input_image,        # Input image for context
-            mask_image          # Mask for additional context
-        ],
-        outputs=prompt
-    )
-    
-    # Model change handler
-    model.change(
-        fn=update_guidance_visibility,
-        inputs=[model],
-        outputs=[guidance]
-    )
-    
-    # Generate button
-    generate_btn.click(
-        fn=generate_fill_gradio,
-        inputs=[
-            prompt, input_image, mask_image, seed, height, width, steps, guidance,
-            metadata, num_images, low_ram
-        ],
-        outputs=[output_gallery, status_text, enhanced_prompt_display]
-    )
-    
-    # Return components
-    return {
-        'prompt': prompt,
-        'input_image': input_image,
-        'mask_image': mask_image,
-        'mask_tool': mask_tool,
-        'clear_mask_btn': clear_mask_btn,
-        'undo_mask_btn': undo_mask_btn,
-        'redo_mask_btn': redo_mask_btn,
-        'model': model,
-        'seed': seed,
-        'width': width,
-        'height': height,
-        'steps': steps,
-        'guidance': guidance,
-        'num_images': num_images,
-        'metadata': metadata,
-        'low_ram': low_ram,
-        'output_gallery': output_gallery,
-        'status_text': status_text,
-        'enhanced_prompt_display': enhanced_prompt_display,
-        'generate_btn': generate_btn
-    }
+                output_gallery = gr.Gallery(
+                    label="Results",
+                    columns=2,
+                    height=420,
+                )
+                status = gr.Textbox(label="Status", interactive=False)
+                used_prompt = gr.Textbox(label="Used Prompt", interactive=False)
+
+        with gr.Accordion("ℹ️ Tips", open=False):
+            gr.Markdown(
+                "- Use the mask canvas to paint white over regions you want regenerated.\n"
+                "- For outpainting, paint beyond the original borders.\n"
+                "- High guidance (20–35) keeps the prompt tightly enforced."
+            )
+
+        def _sync_dimensions(image_path):
+            try:
+                if not image_path:
+                    return gr.update(), gr.update()
+                img = Image.open(image_path)
+                return gr.update(value=img.width), gr.update(value=img.height)
+            except Exception:
+                return gr.update(), gr.update()
+
+        def _reset_mask():
+            return gr.update(value=_blank_mask())
+
+        def _run_fill(
+            image_val,
+            mask_val,
+            prompt_val,
+            base_model_val,
+            seed_val,
+            width_val,
+            height_val,
+            steps_val,
+            guidance_val,
+            num_images_val,
+            low_ram_val,
+            metadata_val,
+        ):
+            if not image_val or not mask_val:
+                return [], "Please provide both image and mask.", prompt_val
+            seed_text = ""
+            if isinstance(seed_val, str) and seed_val.strip():
+                seed_text = seed_val.strip()
+            elif isinstance(seed_val, (int, float)) and seed_val >= 0:
+                seed_text = str(int(seed_val))
+
+            images, message, prompt_used = generate_fill_gradio(
+                prompt_val,
+                image_val,
+                mask_val,
+                base_model_val,
+                seed_text,
+                int(height_val),
+                int(width_val),
+                int(steps_val),
+                guidance_val,
+                metadata_val,
+                num_images=int(num_images_val),
+                low_ram=low_ram_val,
+            )
+            return images, message, prompt_used
+
+        original_image.change(
+            fn=_sync_dimensions,
+            inputs=[original_image],
+            outputs=[width, height],
+        )
+        reset_mask_btn.click(_reset_mask, outputs=[mask_image])
+        enhance_btn.click(
+            lambda p, *args: enhance_prompt(p, *args, tab_name="fill"),
+            inputs=[prompt, *llm_components[:5]],
+            outputs=prompt,
+        )
+
+        generate_btn.click(
+            fn=_run_fill,
+            inputs=[
+                original_image,
+                mask_image,
+                prompt,
+                base_model,
+                seed,
+                width,
+                height,
+                steps,
+                guidance,
+                num_images,
+                low_ram,
+                metadata,
+            ],
+            outputs=[output_gallery, status, used_prompt],
+            concurrency_id="fill_queue",
+        )
+
+    return {}

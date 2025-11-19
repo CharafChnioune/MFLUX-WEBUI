@@ -1,7 +1,20 @@
 # backend/__init__.py
 
 import os
+import sys
 import json
+import importlib.util
+from pathlib import Path
+
+# Ensure the local mflux checkout is importable so every backend module can
+# reference `mflux.*` even when the package is not pip-installed. Per the plan,
+# we treat `mflux-main/src` as the canonical reference implementation.
+repo_root = Path(__file__).resolve().parents[1]
+local_mflux = repo_root / "mflux-main" / "src"
+if local_mflux.exists():
+    local_path = str(local_mflux)
+    if local_path not in sys.path:
+        sys.path.insert(0, local_path)
 
 # Set environment variables
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

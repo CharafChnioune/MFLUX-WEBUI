@@ -2,6 +2,7 @@ import os
 import gc
 import time
 import json
+from pathlib import Path
 from PIL import Image
 from mflux.config.config import Config
 from backend.flux_manager import get_or_create_flux, get_random_seed, calculate_dimensions_with_scale, OUTPUT_DIR
@@ -24,8 +25,20 @@ def generate_image_kontext_gradio(
         print(f"Prompt: {prompt}")
         print(f"Reference image: {reference_image}")
         
-        # Process LoRA files and scales
-        lora_paths, lora_scales_float = process_lora_files(lora_files, lora_scales, exclude_patterns=['in_context_lora'])
+        # Process LoRA files and scales (skip in-context helpers to avoid double-stacking)
+        lora_paths = process_lora_files(lora_files)
+        lora_scales_float = process_lora_files(lora_files, lora_scales)
+        if lora_paths:
+            filtered_paths = []
+            filtered_scales = []
+            for idx, path in enumerate(lora_paths):
+                if "in_context_lora" in Path(path).name.lower():
+                    continue
+                filtered_paths.append(path)
+                if lora_scales_float and idx < len(lora_scales_float):
+                    filtered_scales.append(lora_scales_float[idx])
+            lora_paths = filtered_paths
+            lora_scales_float = filtered_scales if filtered_scales else None
         
         # Calculate dimensions with scale factor support
         ref_img = Image.open(reference_image)
