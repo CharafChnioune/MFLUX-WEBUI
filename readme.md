@@ -2,7 +2,7 @@
 
 ![MFLUX WebUI Logo](logo.png)
 
-A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now with advanced workflow management, battery monitoring, dynamic prompts, and comprehensive configuration support!
+A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now with advanced workflow management, dynamic prompts, and comprehensive configuration support!
 
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -11,7 +11,7 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now wit
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.3** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management, battery monitoring, and intelligent prompt processing.
+MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.3** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
 
 ## Features
 
@@ -29,7 +29,6 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.3** image generatio
 - 🎯 **Dreambooth Fine-Tuning**
 
 ### New v0.9.3 Features
-- 🔋 **Battery Monitor** - Smart generation control based on battery level
 - 🎲 **Dynamic Prompts** - Wildcard support and prompt variations (applied across all generation workflows)
 - 🎯 **Auto Seeds** - Intelligent seed management and selection (shared workflow for Easy, Advanced, Canvas, ControlNet, Image-to-Image, In-Context LoRA)
 - ⚙️ **Configuration Manager** - Advanced config handling with presets
@@ -92,16 +91,14 @@ Set up optional environment variables for enhanced functionality:
 ```bash
 export LORA_LIBRARY_PATH="/path/to/your/lora/models"  # Custom LoRA library location
 export MFLUX_CONFIG_PATH="/path/to/config/files"     # Custom config directory
-export MFLUX_BATTERY_MONITOR=true                    # Enable battery monitoring by default
 ```
 
 #### Initial Setup
 
 1. **First Run**: Launch the WebUI and navigate to the **Configuration** tab
-2. **Battery Setup**: If using a laptop, configure the **Battery Monitor** tab with your preferred thresholds
-3. **Dynamic Prompts**: Set up your prompt categories in the **Dynamic Prompts** tab
-4. **Auto Seeds**: Configure seed management in the **Auto Seeds** tab
-5. **Presets**: Create and save your preferred configuration presets
+2. **Dynamic Prompts**: Set up your prompt categories in the **Dynamic Prompts** tab
+3. **Auto Seeds**: Configure seed management in the **Auto Seeds** tab
+4. **Presets**: Create and save your preferred configuration presets
 
 #### Optional Dependencies
 
@@ -142,8 +139,7 @@ The MFLUX WebUI v0.9.3 contains the following tabs:
 #### New v0.9.3 Management & Workflow Tabs
 19. **Auto Seeds** – intelligent seed management and auto-generation (global workflow for all generation tabs)
 20. **Dynamic Prompts** – wildcard prompts, categories, and variations (applied in Easy, Advanced, Canvas, ControlNet, Image-to-Image and In-Context LoRA)
-21. **Battery Monitor** – battery-aware generation control
-22. **Configuration** – advanced config management with presets
+21. **Configuration** – advanced config management with presets
 
 ## Project Structure
 
@@ -241,19 +237,6 @@ Where categories contain:
 - `animal`: [cat, wolf, eagle, dragon]
 - `environment`: [forest, mountain, ocean, city]
 - `style`: [digital art, oil painting, photograph]
-
-### Battery Monitor
-
-The Battery Monitor tab provides intelligent power management:
-
-- **Enable Monitoring**: Toggle battery-aware generation control
-- **Stop Threshold**: Set battery percentage to stop generation
-- **Pause Threshold**: Set battery percentage to pause generation
-- **Resume on AC**: Automatically resume when plugged in
-- **Notifications**: Enable desktop notifications for battery events
-- **Status Display**: Real-time battery level and charging status
-- **Generation History**: Track power consumption during generation
-- **Power Profile**: Optimize settings based on power source
 
 ### Configuration Manager
 
@@ -449,7 +432,6 @@ This hotfix addresses issues where users who haven't previously downloaded model
 ### v0.9.0 - Major Feature Update
 
 #### New Features
-- 🔋 **Battery Monitor**: Smart power management for laptop users
 - 🎲 **Dynamic Prompts**: Wildcard support with categories and templates
 - 🎯 **Auto Seeds**: Intelligent seed management and selection
 - ⚙️ **Configuration Manager**: Advanced config handling with presets

@@ -14,26 +14,47 @@ from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def get_or_create_flux_catvton(model, quantize=None, low_ram=False):
+def get_or_create_flux_catvton(model, quantize=None, low_ram=False, base_model_override=None):
     """
     Create or retrieve a Flux instance for CatVTON (Virtual Try-On).
     """
     try:
-        from mflux.flux.flux import Flux1
-        from backend.model_manager import get_custom_model_config
+        try:
+            from mflux.flux.flux import Flux1
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.txt2img.flux import Flux1
+        from backend.model_manager import (
+    CustomModelConfig,
+    get_custom_model_config,
+    normalize_base_model_choice,
+    resolve_local_path,
+)
         
         base_model = model.replace("-8-bit", "").replace("-4-bit", "").replace("-6-bit", "").replace("-3-bit", "")
         
         try:
             custom_config = get_custom_model_config(base_model)
-            if base_model in ["dev", "schnell"]:
-                model_path = None
-            else:
-                model_path = os.path.join("models", base_model)
+            if base_model_override and base_model_override != custom_config.base_arch:
+                custom_config = CustomModelConfig(
+                    model_name=custom_config.model_name,
+                    alias=custom_config.alias,
+                    num_train_steps=custom_config.num_train_steps,
+                    max_sequence_length=custom_config.max_sequence_length,
+                    base_arch=base_model_override,
+                    local_dir=custom_config.local_dir,
+                )
+            model_path = str(custom_config.local_dir) if custom_config.local_dir else None
         except ValueError:
-            from backend.model_manager import CustomModelConfig
-            custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
-            model_path = os.path.join("models", base_model)
+            local_dir = resolve_local_path(base_model)
+            custom_config = CustomModelConfig(
+                base_model,
+                base_model,
+                1000,
+                512,
+                base_arch=base_model_override or "schnell",
+                local_dir=local_dir,
+            )
+            model_path = str(local_dir) if local_dir else None
             
         if "-8-bit" in model:
             quantize = 8
@@ -62,7 +83,7 @@ def get_or_create_flux_catvton(model, quantize=None, low_ram=False):
         return None
 
 def generate_catvton_gradio(
-    person_image, clothing_image, model, seed, height, width, steps, guidance,
+    person_image, clothing_image, model, base_model, seed, height, width, steps, guidance,
     prompt_style, metadata, num_images=1, low_ram=False
 ):
     """
@@ -76,10 +97,12 @@ def generate_catvton_gradio(
         if not clothing_image:
             return [], "Error: Clothing image is required"
             
+        base_model_override = normalize_base_model_choice(base_model)
         # Get or create flux instance
         flux = get_or_create_flux_catvton(
             model=model,
-            low_ram=low_ram
+            low_ram=low_ram,
+            base_model_override=base_model_override,
         )
         
         if not flux:
@@ -182,6 +205,7 @@ def generate_catvton_gradio(
                         "width": width,
                         "height": height,
                         "model": model,
+                        "base_model_override": base_model_override,
                         "generation_time": str(time.ctime()),
                         "person_image": os.path.basename(person_image),
                         "clothing_image": os.path.basename(clothing_image)

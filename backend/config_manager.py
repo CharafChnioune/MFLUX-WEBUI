@@ -53,11 +53,6 @@ class ConfigManager:
                 "pool_size": 100,
                 "shuffle": True
             },
-            "battery": {
-                "monitoring_enabled": False,
-                "stop_percentage": 20,
-                "pause_on_low": True
-            },
             "quantization": {
                 "default_bits": 4,
                 "auto_quantize": False,
@@ -214,12 +209,6 @@ class ConfigManager:
                 "enabled": False,
                 "pool_size": 100,
                 "shuffle": True
-            },
-            "battery": {
-                "_comment": "Battery monitoring settings",
-                "monitoring_enabled": False,
-                "stop_percentage": 20,
-                "pause_on_low": True
             }
         }
         
@@ -244,12 +233,6 @@ class ConfigManager:
             if dim in gen_config:
                 if not isinstance(gen_config[dim], int) or gen_config[dim] < 256:
                     errors.append(f"generation.{dim} must be an integer >= 256")
-        
-        # Validate battery settings
-        battery_config = config.get("battery", {})
-        if "stop_percentage" in battery_config:
-            if not isinstance(battery_config["stop_percentage"], int) or not (5 <= battery_config["stop_percentage"] <= 50):
-                errors.append("battery.stop_percentage must be an integer between 5 and 50")
         
         return errors
     

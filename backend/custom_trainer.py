@@ -255,7 +255,10 @@ class CustomFlux1(Flux1):
         os.environ["HUGGING_FACE_HUB_TOKEN"] = ""
         
         # Importeer FluxInitializer met een lokaal pad
-        from mflux.flux.flux_initializer import FluxInitializer
+        try:
+            from mflux.flux.flux_initializer import FluxInitializer
+        except ModuleNotFoundError:
+            from mflux.models.flux.flux_initializer import FluxInitializer
         
         # Initialiseer het model
         FluxInitializer.init(

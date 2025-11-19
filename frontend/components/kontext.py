@@ -89,36 +89,6 @@ def create_kontext_tab():
                             value=False
                         )
                 
-                # MFLUX v0.9.0 Advanced Options
-                with gr.Accordion("Advanced Options (MFLUX v0.9.0)", open=False):
-                    prompt_file = gr.File(
-                        label="Prompt File",
-                        file_types=[".txt"],
-                        file_count="single"
-                    )
-                    
-                    config_from_metadata = gr.File(
-                        label="Config from Metadata",
-                        file_types=[".json", ".png", ".jpg", ".jpeg"],
-                        file_count="single"
-                    )
-                    
-                    stepwise_output_dir = gr.Textbox(
-                        label="Stepwise Output Directory",
-                        placeholder="/path/to/stepwise/output"
-                    )
-                    
-                    with gr.Row():
-                        vae_tiling = gr.Checkbox(
-                            label="VAE Tiling",
-                            value=False
-                        )
-                        vae_tiling_split = gr.Dropdown(
-                            choices=["horizontal", "vertical"],
-                            label="VAE Tiling Split",
-                            value="horizontal"
-                        )
-                
                 with gr.Group():
                     gr.Markdown("### Output Settings")
                     metadata = gr.Checkbox(
@@ -182,14 +152,53 @@ def create_kontext_tab():
         outputs=prompt
     )
     
+    def run_kontext_generation(
+        prompt_val,
+        reference_image_val,
+        seed_val,
+        width_val,
+        height_val,
+        steps_val,
+        guidance_val,
+        num_images_val,
+        low_ram_val,
+        metadata_val,
+    ):
+        if not reference_image_val:
+            return [], "Error: Reference image is required", prompt_val
+        parsed_seed = None
+        if isinstance(seed_val, (int, float)) and seed_val >= 0:
+            parsed_seed = int(seed_val)
+        return generate_image_kontext_gradio(
+            prompt_val,
+            reference_image_val,
+            "dev",
+            parsed_seed,
+            width_val,
+            height_val,
+            steps_val,
+            guidance_val,
+            None,
+            metadata_val,
+            num_images=num_images_val,
+            low_ram=low_ram_val,
+        )
+
     generate_btn.click(
-        generate_image_kontext_gradio,
+        fn=run_kontext_generation,
         inputs=[
-            prompt, reference_image, seed, height, width, steps, guidance,
-            metadata, prompt_file, config_from_metadata, stepwise_output_dir,
-            vae_tiling, vae_tiling_split, num_images, low_ram
+            prompt,
+            reference_image,
+            seed,
+            width,
+            height,
+            steps,
+            guidance,
+            num_images,
+            low_ram,
+            metadata,
         ],
-        outputs=[output_images, output_info, prompt]
+        outputs=[output_images, output_info, prompt],
     )
     
     return {

@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "random_selection": true,
+  "max_variations": 10,
+  "replacement_markers": {
+    "start": "[",
+    "end": "]",
+    "separator": "|"
+  },
+  "prompt_files": [],
+  "categories": {
+    "styles": [],
+    "subjects": [],
+    "environments": [],
+    "lighting": [],
+    "colors": [],
+    "moods": []
+  }
+}

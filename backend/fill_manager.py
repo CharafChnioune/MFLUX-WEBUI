@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 from mflux.config.config import Config
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
+from backend.model_manager import normalize_base_model_choice
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -19,7 +20,10 @@ def get_or_create_flux_fill(quantize=None, low_ram=False):
     Create or retrieve a Flux Fill instance.
     """
     try:
-        from mflux.flux.flux import Flux1
+        try:
+            from mflux.flux.flux import Flux1
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.txt2img.flux import Flux1
         
         # Fill model is always FLUX.1-Fill-dev
         model_config = "flux.1-fill-dev"
@@ -39,9 +43,39 @@ def get_or_create_flux_fill(quantize=None, low_ram=False):
         traceback.print_exc()
         return None
 
+def _ensure_image(value, mode="RGB"):
+    """
+    Normalize incoming image data (path, PIL image, or sketch dict) to a PIL.Image.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Image.Image):
+        return value.convert(mode)
+    if isinstance(value, dict):
+        # Sketch tool returns {"image": pil, "mask": pil}
+        if "mask" in value and value["mask"] is not None:
+            return _ensure_image(value["mask"], mode)
+        if "image" in value and value["image"] is not None:
+            return _ensure_image(value["image"], mode)
+        return None
+    if hasattr(value, "read"):
+        return Image.open(value).convert(mode)
+    return Image.open(value).convert(mode)
+
+
 def generate_fill_gradio(
-    prompt, image_path, mask_path, seed, height, width, steps, guidance,
-    metadata, num_images=1, low_ram=False
+    prompt,
+    image_input,
+    mask_input,
+    base_model,
+    seed,
+    height,
+    width,
+    steps,
+    guidance,
+    metadata,
+    num_images=1,
+    low_ram=False,
 ):
     """
     Generate images using the Fill tool for inpainting/outpainting.
@@ -51,11 +85,22 @@ def generate_fill_gradio(
         if not prompt or not prompt.strip():
             return [], "Error: Prompt is required", prompt
             
-        if not image_path:
+        if not image_input:
             return [], "Error: Input image is required", prompt
             
-        if not mask_path:
+        if not mask_input:
             return [], "Error: Mask image is required", prompt
+
+        original_image = _ensure_image(image_input, "RGB")
+        mask_image = _ensure_image(mask_input, "L")
+
+        if original_image is None or mask_image is None:
+            return [], "Error: Could not read image or mask", prompt
+
+        base_model_override = normalize_base_model_choice(base_model)
+        if base_model_override and base_model_override not in {"dev", "dev-fill", "krea-dev"}:
+            print(f"Warning: Fill only supports dev variants. Ignoring base_model={base_model_override}.")
+            base_model_override = None
             
         # Get or create flux fill instance
         flux = get_or_create_flux_fill(quantize=8 if low_ram else None, low_ram=low_ram)
@@ -76,10 +121,6 @@ def generate_fill_gradio(
                     current_seed = random.randint(0, 2**32 - 1)
                     
                 print(f"Generating fill image {i+1}/{num_images} with seed: {current_seed}")
-                
-                # Load images
-                original_image = Image.open(image_path).convert("RGB")
-                mask_image = Image.open(mask_path).convert("L")  # Grayscale mask
                 
                 # Parse dimensions
                 if not height or height == 0:
@@ -129,6 +170,7 @@ def generate_fill_gradio(
                         "width": width,
                         "height": height,
                         "generation_time": str(time.ctime()),
+                        "base_model_override": base_model_override or "dev",
                         "fill_type": "inpaint/outpaint"
                     }
                     with open(metadata_path, "w") as f:

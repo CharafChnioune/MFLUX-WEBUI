@@ -19,7 +19,10 @@ def get_or_create_flux_redux(model, quantize=None, lora_paths=None, lora_scales=
     Create or retrieve a Flux instance for Redux (image variation).
     """
     try:
-        from mflux.flux.flux import Flux1
+        try:
+            from mflux.flux.flux import Flux1
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.txt2img.flux import Flux1
         from backend.model_manager import get_custom_model_config
         
         base_model = model.replace("-8-bit", "").replace("-4-bit", "").replace("-6-bit", "").replace("-3-bit", "")

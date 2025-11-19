@@ -2,6 +2,8 @@ import gradio as gr
 from backend.depth_manager import depth_manager
 from backend.prompts_manager import enhance_prompt
 from frontend.components.llmsettings import create_llm_settings
+from backend.depth_export_manager import export_depth_maps
+from backend.model_manager import get_updated_models, get_base_model_choices
 
 def create_depth_tab():
     """Create the Depth tool tab for generating images from depth maps"""
@@ -37,8 +39,14 @@ def create_depth_tab():
                 
                 model_name = gr.Dropdown(
                     label="Model",
-                    choices=["schnell", "dev"],
+                    choices=get_updated_models(),
                     value="schnell"
+                )
+                base_model = gr.Dropdown(
+                    label="Base Model (--base-model)",
+                    choices=["Auto"] + get_base_model_choices(),
+                    value="Auto",
+                    info="Needed for custom Hugging Face repos."
                 )
                 
                 # Advanced options
@@ -184,7 +192,7 @@ def create_depth_tab():
         random_seed_btn.click(fn=random_seed, outputs=[seed])
         
         # Generation function wrapper
-        def generate_depth_images(reference_image, prompt, model_name, seed, width, height, 
+        def generate_depth_images(reference_image, prompt, model_name, base_model_value, seed, width, height, 
                                  guidance, steps, num_images, controlnet_strength, 
                                  save_metadata, low_ram_mode, quantize, save_canny):
             if reference_image is None:
@@ -201,6 +209,7 @@ def create_depth_tab():
                     reference_image=reference_image,
                     prompt=prompt,
                     model_name=model_name,
+                    base_model=base_model_value if base_model_value not in ("Auto", None, "") else None,
                     seed=seed,
                     width=width,
                     height=height,
@@ -251,11 +260,29 @@ def create_depth_tab():
         generate_btn.click(
             fn=generate_depth_images,
             inputs=[
-                reference_image, prompt, model_name, seed, width, height,
+                reference_image, prompt, model_name, base_model, seed, width, height,
                 guidance, steps, num_images, controlnet_strength,
                 save_metadata, low_ram_mode, quantize, save_canny
             ],
             outputs=[output_gallery, status, generation_info]
         )
+
+        with gr.Accordion("🗺️ Depth Map Export Utility", open=False):
+            depth_files = gr.Files(label="Images for Depth Export", file_types=["image"], type="filepath", height=120)
+            depth_output_dir = gr.Textbox(label="Destination Directory", value="output/depth_maps")
+            depth_quantize = gr.Dropdown(
+                choices=["None", "8", "4"],
+                value="None",
+                label="Quantize Bits",
+            )
+            depth_export_button = gr.Button("Export Depth Maps", variant="secondary")
+            depth_export_gallery = gr.Gallery(label="Depth Maps", columns=[4], height=200)
+            depth_export_status = gr.Textbox(label="Export Status", interactive=False)
+
+            depth_export_button.click(
+                fn=export_depth_maps,
+                inputs=[depth_files, depth_output_dir, depth_quantize],
+                outputs=[depth_export_gallery, depth_export_status],
+            )
     
     return reference_image, prompt, generate_btn
