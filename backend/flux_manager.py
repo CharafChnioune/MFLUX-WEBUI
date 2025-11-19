@@ -6,8 +6,12 @@ import traceback
 import mlx.core as mx
 from PIL import Image
 from mflux.config.config import Config
-from mflux.flux.flux import Flux1
-from mflux.controlnet.flux_controlnet import Flux1Controlnet
+try:
+    from mflux.flux.flux import Flux1
+    from mflux.controlnet.flux_controlnet import Flux1Controlnet
+except ModuleNotFoundError:
+    from mflux.models.flux.variants.txt2img.flux import Flux1
+    from mflux.models.flux.variants.controlnet.flux_controlnet import Flux1Controlnet
 from backend.lora_manager import process_lora_files, download_lora
 from backend.ollama_manager import enhance_prompt
 from backend.prompts_manager import enhance_prompt_with_mlx
@@ -26,6 +30,12 @@ from pathlib import Path
 import numpy as np
 import re
 from typing import Union, Tuple, Optional
+from backend.model_manager import (
+    CustomModelConfig,
+    get_custom_model_config,
+    resolve_local_path,
+    normalize_base_model_choice,
+)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -99,7 +109,7 @@ def calculate_dimensions_with_scale(
     
     return width, height 
 
-def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_scales=None, is_controlnet=False, low_ram=False):
+def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_scales=None, is_controlnet=False, low_ram=False, base_model_override: Optional[str] = None):
     """
     Create or retrieve a Flux1 instance.
     """
@@ -107,22 +117,28 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
         base_model = model.replace("-8-bit", "").replace("-4-bit", "").replace("-6-bit", "").replace("-3-bit", "")
         
         try:
-            from backend.model_manager import get_custom_model_config
             custom_config = get_custom_model_config(base_model)
-            if base_model in ["dev", "schnell", "dev-8-bit", "dev-4-bit", "dev-6-bit", "dev-3-bit", 
-                             "schnell-8-bit", "schnell-4-bit", "schnell-6-bit", "schnell-3-bit"]:
-                model_path = None
-                # Base model architecture is the same as model name for official models
-                base_model_arch = base_model.split("-")[0] if "-" in base_model else base_model
-            else:
-                model_path = os.path.join("models", base_model)
-                # For third-party models, get base architecture from custom_config
-                base_model_arch = custom_config.base_arch if hasattr(custom_config, 'base_arch') else 'schnell'
+            if base_model_override and base_model_override != custom_config.base_arch:
+                custom_config = CustomModelConfig(
+                    model_name=custom_config.model_name,
+                    alias=custom_config.alias,
+                    num_train_steps=custom_config.num_train_steps,
+                    max_sequence_length=custom_config.max_sequence_length,
+                    base_arch=base_model_override,
+                    local_dir=custom_config.local_dir,
+                )
+            model_path = str(custom_config.local_dir) if custom_config.local_dir else None
         except ValueError:
-            from backend.model_manager import CustomModelConfig
-            custom_config = CustomModelConfig(base_model, base_model, 1000, 512)
-            model_path = os.path.join("models", base_model)
-            base_model_arch = 'schnell'  # Default to schnell architecture for custom models
+            local_dir = resolve_local_path(base_model)
+            custom_config = CustomModelConfig(
+                model_name=base_model,
+                alias=base_model,
+                num_train_steps=1000,
+                max_sequence_length=512,
+                base_arch=base_model_override or "schnell",
+                local_dir=local_dir,
+            )
+            model_path = str(local_dir) if local_dir else None
 
         if "-8-bit" in model:
             quantize = 8
@@ -249,6 +265,7 @@ def simple_generate_image(
 ):
     """
     Simple interface for generating images.
+    Uses the same dynamic prompts and seed workflow as the advanced flows.
     """
     try:
         print(f"\n--- Generating image ---")
@@ -260,6 +277,15 @@ def simple_generate_image(
         print(f"Number of Images: {num_images}")
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before generation")
+
+        # Apply dynamic prompts via the shared workflow
+        try:
+            processed_prompt = process_dynamic_prompt(prompt)
+            if processed_prompt != prompt:
+                print(f"Dynamic prompt processed (simple): {processed_prompt}")
+            prompt = processed_prompt
+        except Exception as e:
+            print(f"Warning: Dynamic prompt processing failed in simple_generate_image: {e}")
         
         # Create a Flux instance
         flux = get_or_create_flux(
@@ -284,7 +310,13 @@ def simple_generate_image(
         
         try:
             for i in range(int(num_images)):
-                seed = int(time.time()) + i
+                # Use unified workflow seed management (Auto Seeds + fallback)
+                try:
+                    seed = get_next_seed(None)
+                except Exception as e:
+                    print(f"Warning: get_next_seed failed in simple_generate_image, using time-based seed: {e}")
+                    seed = int(time.time()) + i
+
                 output_filename = f"generated_{int(time.time())}_{i}.png"
                 output_path = os.path.join(OUTPUT_DIR, output_filename)
                 
@@ -478,8 +510,10 @@ def generate_image_gradio(
             print(f"Dynamic prompt processed: {processed_prompt}")
         prompt = processed_prompt
 
-        # 7. Process LoRA files and scales
+        # 7. Process LoRA files and scales (docs: gradiodocs/docs-image/image.md for file inputs)
+        lora_paths = process_lora_files(lora_files)
         lora_scales_float = process_lora_files(lora_files, lora_scales)
+        base_model_override = normalize_base_model_choice(base_model)
         
         # 8. Enhance prompt with Ollama if requested
         if ollama_model and system_prompt:
@@ -488,14 +522,43 @@ def generate_image_gradio(
             
         # 9. Determine seeds to use (auto-seeds integration)
         seeds = []
-        if auto_seeds and auto_seeds > 0:
-            # Legacy auto-seeds support
-            seeds = [random.randint(1, 1000000000) for _ in range(auto_seeds)]
-        elif seed is not None:
-            seeds = [seed]
-        else:
-            # Use workflow seed management (integrates with auto-seeds manager)
-            seeds = [get_next_seed(seed) for _ in range(num_images)]
+
+        # Treat auto_seeds as a simple on/off flag:
+        # when enabled we always use automatic seeds (ignoring explicit seed),
+        # otherwise we respect an explicit seed if provided.
+        try:
+            auto_seeds_enabled = bool(auto_seeds) and int(auto_seeds) > 0
+        except (TypeError, ValueError):
+            auto_seeds_enabled = False
+
+        # Normalize number of images
+        try:
+            total_images = int(num_images) if num_images else 1
+        except (TypeError, ValueError):
+            total_images = 1
+        if total_images < 1:
+            total_images = 1
+
+        # Normalize seed to an optional int
+        seed_int: Optional[int] = None
+        if seed not in (None, "", "None"):
+            try:
+                seed_int = int(seed)
+            except (TypeError, ValueError):
+                print(f"Warning: Invalid seed value '{seed}', ignoring explicit seed")
+                seed_int = None
+
+        for _ in range(total_images):
+            try:
+                if auto_seeds_enabled:
+                    # Force automatic seed selection (Auto Seeds manager or random)
+                    seeds.append(get_next_seed(None))
+                else:
+                    # Use provided seed if any, otherwise let workflow decide
+                    seeds.append(get_next_seed(seed_int))
+            except Exception as e:
+                print(f"Warning: get_next_seed failed in generate_image_gradio, using random seed: {e}")
+                seeds.append(random.randint(0, 2**32 - 1))
         
         all_images = []
         all_seeds = []
@@ -520,7 +583,8 @@ def generate_image_gradio(
                     model=model,
                     lora_paths=lora_files,
                     lora_scales=lora_scales_float,
-                    low_ram=low_ram
+                    low_ram=low_ram,
+                    base_model_override=base_model
                 )
                 
                 if not flux:
@@ -573,7 +637,7 @@ def generate_image_gradio(
                     "model": model,
                     "generation_time": str(time.ctime()),
                     "generation_duration": time.time() - generation_start_time,
-                    "lora_files": lora_files,
+                    "lora_files": lora_paths,
                     "lora_scales": lora_scales_float,
                     "low_ram_mode": low_ram,
                     "filename": filename
@@ -660,31 +724,62 @@ def generate_image_controlnet_gradio(
         print(f"Save canny: {save_canny}")
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before controlnet generation")
+
+        # Load prompt from file if specified (CLI-style --prompt-file)
+        if prompt_file and str(prompt_file).strip():
+            try:
+                from backend.dynamic_prompts_manager import load_prompt_from_file
+                file_prompt = load_prompt_from_file(str(prompt_file).strip())
+                if file_prompt:
+                    print(f"Loaded prompt from file '{prompt_file}': {file_prompt}")
+                    prompt = file_prompt
+                else:
+                    print(f"Warning: Could not load prompt from file '{prompt_file}', using original prompt")
+            except Exception as e:
+                print(f"Error loading prompt file '{prompt_file}' in ControlNet: {str(e)}")
+                print("Using original prompt instead")
+
+        # Apply dynamic prompt processing so ControlNet matches main workflow
+        try:
+            processed_prompt = process_dynamic_prompt(prompt)
+            if processed_prompt != prompt:
+                print(f"Dynamic prompt processed (ControlNet): {processed_prompt}")
+            prompt = processed_prompt
+        except Exception as e:
+            print(f"Warning: Dynamic prompt processing failed in ControlNet: {e}")
         
         # Generate temporary file path for control image
         control_image_path = os.path.join(OUTPUT_DIR, f"controlnet_input_{int(time.time())}.png")
         control_image.save(control_image_path)
         
-        # Process lora files and scales
+        # Process LoRA selections and normalize base model override
+        lora_paths = process_lora_files(lora_files)
         lora_scales_float = process_lora_files(lora_files, lora_scales)
+        base_model_override = normalize_base_model_choice(base_model)
         
-        # Auto-generate seed if not provided
-        if not seed:
-            seed = get_random_seed()
-        else:
+        # Determine seed via shared workflow (Auto Seeds + fallback)
+        seed_int: Optional[int] = None
+        if seed not in (None, "", "None"):
             try:
-                seed = int(seed)
-            except ValueError:
-                seed = get_random_seed()
-                print(f"Invalid seed, using random seed: {seed}")
+                seed_int = int(seed)
+            except (TypeError, ValueError):
+                print(f"Warning: Invalid seed value '{seed}' in ControlNet, falling back to auto-seed")
+                seed_int = None
+
+        try:
+            seed = get_next_seed(seed_int)
+        except Exception as e:
+            print(f"Warning: get_next_seed failed in ControlNet, using random seed: {e}")
+            seed = int(time.time())
         
         # Initialize Flux1Controlnet
         flux = get_or_create_flux(
             model=model,
-            lora_paths=lora_files,
+            lora_paths=lora_paths,
             lora_scales=lora_scales_float,
             is_controlnet=True,
-            low_ram=low_ram
+            low_ram=low_ram,
+            base_model_override=base_model_override
         )
         
         if not flux:
@@ -728,7 +823,10 @@ def generate_image_controlnet_gradio(
             # Save canny reference if requested
             if save_canny:
                 # Maak de canny edge detectie afbeelding met ControlnetUtil
-                from mflux.controlnet.controlnet_util import ControlnetUtil
+                try:
+                    from mflux.controlnet.controlnet_util import ControlnetUtil
+                except ModuleNotFoundError:
+                    from mflux.models.flux.variants.controlnet.controlnet_util import ControlnetUtil
                 from PIL import Image
                 import numpy as np
                 
@@ -788,7 +886,7 @@ def generate_image_controlnet_gradio(
                     "model": model,
                     "controlnet_strength": controlnet_strength_float,
                     "generation_time": str(time.ctime()),
-                    "lora_files": lora_files,
+                    "lora_files": lora_paths,
                     "lora_scales": lora_scales_float
                 }
                 with open(metadata_path, "w") as f:
@@ -838,31 +936,62 @@ def generate_image_i2i_gradio(
         print(f"LoRA scales: {lora_scales}")
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before image-to-image generation")
-        
+
+        # Load prompt from file if specified
+        if prompt_file and str(prompt_file).strip():
+            try:
+                from backend.dynamic_prompts_manager import load_prompt_from_file
+                file_prompt = load_prompt_from_file(str(prompt_file).strip())
+                if file_prompt:
+                    print(f"Loaded prompt from file '{prompt_file}': {file_prompt}")
+                    prompt = file_prompt
+                else:
+                    print(f"Warning: Could not load prompt from file '{prompt_file}', using original prompt")
+            except Exception as e:
+                print(f"Error loading prompt file '{prompt_file}' in image-to-image: {str(e)}")
+                print("Using original prompt instead")
+
+        # Apply dynamic prompt processing for image-to-image
+        try:
+            processed_prompt = process_dynamic_prompt(prompt)
+            if processed_prompt != prompt:
+                print(f"Dynamic prompt processed (image-to-image): {processed_prompt}")
+            prompt = processed_prompt
+        except Exception as e:
+            print(f"Warning: Dynamic prompt processing failed in image-to-image: {e}")
+
         # Generate temporary file path for input image
         input_image_path = os.path.join(OUTPUT_DIR, f"i2i_input_{int(time.time())}.png")
         input_image.save(input_image_path)
         
-        # Process lora files and scales
+        # Process LoRA files and normalize base model override
+        lora_paths = process_lora_files(lora_files)
         lora_scales_float = process_lora_files(lora_files, lora_scales)
+        base_model_override = normalize_base_model_choice(base_model)
         
-        # Auto-generate seed if not provided
-        if not seed:
-            seed = get_random_seed()
-        else:
+        # Determine seed via shared workflow (Auto Seeds + fallback)
+        seed_int: Optional[int] = None
+        if seed not in (None, "", "None"):
             try:
-                seed = int(seed)
-            except ValueError:
-                seed = get_random_seed()
-                print(f"Invalid seed, using random seed: {seed}")
+                seed_int = int(seed)
+            except (TypeError, ValueError):
+                print(f"Warning: Invalid seed value '{seed}' in image-to-image, falling back to auto-seed")
+                seed_int = None
+
+        try:
+            seed = get_next_seed(seed_int)
+        except Exception as e:
+            print(f"Warning: get_next_seed failed in image-to-image, using random seed: {e}")
+            seed = int(time.time())
         
         # Initialize Flux
         flux = get_or_create_flux(
             model=model,
             image=input_image_path,  # Merk op: hier gebruiken we image parameter
-            lora_paths=lora_files,
+            lora_paths=lora_paths,
             lora_scales=lora_scales_float,
-            low_ram=low_ram
+            low_ram=low_ram,
+            base_model_override=base_model_override
         )
         
         if not flux:
@@ -918,7 +1047,7 @@ def generate_image_i2i_gradio(
                     "model": model,
                     "image_strength": image_strength_float,
                     "generation_time": str(time.ctime()),
-                    "lora_files": lora_files,
+                    "lora_files": lora_paths,
                     "lora_scales": lora_scales_float
                 }
                 with open(metadata_path, "w") as f:
@@ -969,6 +1098,29 @@ def generate_image_in_context_lora_gradio(
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before in-context LoRA generation")
 
+        # Load prompt from file if specified
+        if prompt_file and str(prompt_file).strip():
+            try:
+                from backend.dynamic_prompts_manager import load_prompt_from_file
+                file_prompt = load_prompt_from_file(str(prompt_file).strip())
+                if file_prompt:
+                    print(f"Loaded prompt from file '{prompt_file}': {file_prompt}")
+                    prompt = file_prompt
+                else:
+                    print(f"Warning: Could not load prompt from file '{prompt_file}', using original prompt")
+            except Exception as e:
+                print(f"Error loading prompt file '{prompt_file}' in in-context LoRA: {str(e)}")
+                print("Using original prompt instead")
+
+        # Apply dynamic prompt processing for in-context LoRA
+        try:
+            processed_prompt = process_dynamic_prompt(prompt)
+            if processed_prompt != prompt:
+                print(f"Dynamic prompt processed (in-context LoRA): {processed_prompt}")
+            prompt = processed_prompt
+        except Exception as e:
+            print(f"Warning: Dynamic prompt processing failed in in-context LoRA: {e}")
+
         # Process parameters
         from mflux.community.in_context_lora.in_context_loras import LORA_NAME_MAP, LORA_REPO_ID
         from backend.lora_manager import download_lora
@@ -977,8 +1129,13 @@ def generate_image_in_context_lora_gradio(
         ref_image_path = os.path.join(OUTPUT_DIR, f"in_context_ref_{int(time.time())}.png")
         reference_image.save(ref_image_path)
         
-        # Process lora files and scales
+        # Process LoRA files and normalize base model override
+        lora_paths = process_lora_files(lora_files)
         lora_scales_float = process_lora_files(lora_files, lora_scales)
+        base_model_override = normalize_base_model_choice(base_model)
+
+        if lora_paths is None:
+            lora_paths = []
         
         # Download the style LoRA if specified
         if lora_style:
@@ -988,10 +1145,7 @@ def generate_image_in_context_lora_gradio(
                 lora_path = download_lora(lora_filename, repo_id=LORA_REPO_ID)
                 if lora_path and os.path.exists(lora_path):
                     # Add the style LoRA to the list
-                    if lora_files is None:
-                        lora_files = [lora_path]
-                    else:
-                        lora_files.append(lora_path)
+                    lora_paths.append(lora_path)
                     
                     # Add a default scale for the style LoRA
                     if lora_scales_float is None:
@@ -1001,22 +1155,28 @@ def generate_image_in_context_lora_gradio(
                         
                     print(f"Added style LoRA: {lora_path}")
         
-        # Auto-generate seed if not provided
-        if not seed:
-            seed = get_random_seed()
-        else:
+        # Determine seed via shared workflow (Auto Seeds + fallback)
+        seed_int: Optional[int] = None
+        if seed not in (None, "", "None"):
             try:
-                seed = int(seed)
-            except ValueError:
-                seed = get_random_seed()
-                print(f"Invalid seed, using random seed: {seed}")
+                seed_int = int(seed)
+            except (TypeError, ValueError):
+                print(f"Warning: Invalid seed value '{seed}' in in-context LoRA, falling back to auto-seed")
+                seed_int = None
+
+        try:
+            seed = get_next_seed(seed_int)
+        except Exception as e:
+            print(f"Warning: get_next_seed failed in in-context LoRA, using random seed: {e}")
+            seed = int(time.time())
         
         # Initialize Flux
         flux = get_or_create_flux(
             model=model,
-            lora_paths=lora_files,
+            lora_paths=lora_paths,
             lora_scales=lora_scales_float,
-            low_ram=low_ram
+            low_ram=low_ram,
+            base_model_override=base_model_override
         )
         
         if not flux:
@@ -1092,7 +1252,7 @@ def generate_image_in_context_lora_gradio(
                     "model": model,
                     "lora_style": lora_style,
                     "generation_time": str(time.ctime()),
-                    "lora_files": lora_files,
+                    "lora_files": lora_paths,
                     "lora_scales": lora_scales_float
                 }
                 with open(metadata_path, "w") as f:
@@ -1325,4 +1485,3 @@ def generate_image_kontext_gradio(
             del flux
         gc.collect()
         force_mlx_cleanup()
-

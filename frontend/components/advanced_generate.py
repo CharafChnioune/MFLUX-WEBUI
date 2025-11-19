@@ -1,5 +1,5 @@
 import gradio as gr
-from backend.model_manager import get_updated_models, update_guidance_visibility
+from backend.model_manager import get_updated_models, update_guidance_visibility, get_base_model_choices
 from backend.lora_manager import (
     get_lora_choices,
     update_lora_scales,
@@ -46,11 +46,11 @@ def create_advanced_generate_tab():
             )
             
             base_model = gr.Dropdown(
-                choices=["None", "schnell", "dev"],
+                choices=["Auto"] + get_base_model_choices(),
                 label="Base Model (--base-model)",
-                value="None",
+                value="Auto",
                 info="Required for third-party HuggingFace models",
-                visible=False
+                visible=True
             )
 
             with gr.Row():
@@ -142,8 +142,20 @@ def create_advanced_generate_tab():
 
             # Options for generating multiple images
             with gr.Row():
-                num_images = gr.Number(label="Number of Images", value=1, precision=0)
-                auto_seeds = gr.Checkbox(label="Auto-generate random seeds", value=False)
+                num_images = gr.Number(
+                    label="Number of Images",
+                    value=1,
+                    precision=0,
+                    info="How many images to generate in this batch"
+                )
+                auto_seeds = gr.Checkbox(
+                    label="Use Auto Seeds workflow",
+                    value=False,
+                    info=(
+                        "When enabled, seeds for this batch are taken from the global Auto Seeds workflow "
+                        "and the manual Seed field is ignored (one seed per image)."
+                    ),
+                )
             
             # Additional options
             with gr.Accordion("Additional Options", open=False):
@@ -213,14 +225,11 @@ def create_advanced_generate_tab():
                 valid_scales = lora_scales[:len(valid_loras)]
             else:
                 valid_scales = []
-            
-            # Convert auto_seeds to number or None
-            auto_seeds_value = 8 if auto_seeds else None
-            
+
             return generate_image_gradio(
                 prompt,
                 model,
-                base_model if base_model != "None" else None,
+                base_model if base_model not in ("Auto", None, "") else None,
                 seed,
                 width,
                 height,
@@ -238,7 +247,7 @@ def create_advanced_generate_tab():
                 *valid_scales,
                 num_images=num_images,
                 low_ram=low_ram,
-                auto_seeds=auto_seeds_value
+                auto_seeds=auto_seeds
             )
 
         generate_button.click(

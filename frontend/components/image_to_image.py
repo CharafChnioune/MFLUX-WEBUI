@@ -1,6 +1,6 @@
 import gradio as gr
 from PIL import Image
-from backend.model_manager import get_updated_models
+from backend.model_manager import get_updated_models, get_base_model_choices
 from backend.lora_manager import (
     get_lora_choices,
     update_lora_scales,
@@ -189,9 +189,9 @@ def create_image_to_image_tab():
             # MFLUX v0.9.0 Features
             with gr.Accordion("⚡ MFLUX v0.9.0 Features", open=False):
                 base_model_i2i = gr.Dropdown(
-                    choices=["None", "schnell", "dev"],
+                    choices=["Auto"] + get_base_model_choices(),
                     label="Base Model (for third-party HuggingFace models)",
-                    value="None"
+                    value="Auto"
                 )
                 prompt_file_i2i = gr.Textbox(
                     label="Prompt File Path (--prompt-file)",
@@ -260,7 +260,7 @@ def create_image_to_image_tab():
                 prompt,
                 input_image,
                 model,
-                base_model if base_model != "None" else None,
+                base_model if base_model not in ("Auto", "None", "", None) else None,
                 seed,
                 height,
                 width,

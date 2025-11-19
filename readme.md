@@ -30,8 +30,8 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.9.3** image generatio
 
 ### New v0.9.3 Features
 - 🔋 **Battery Monitor** - Smart generation control based on battery level
-- 🎲 **Dynamic Prompts** - Wildcard support and prompt variations
-- 🎯 **Auto Seeds** - Intelligent seed management and selection
+- 🎲 **Dynamic Prompts** - Wildcard support and prompt variations (applied across all generation workflows)
+- 🎯 **Auto Seeds** - Intelligent seed management and selection (shared workflow for Easy, Advanced, Canvas, ControlNet, Image-to-Image, In-Context LoRA)
 - ⚙️ **Configuration Manager** - Advanced config handling with presets
 - 📊 **Generation Workflow** - Comprehensive progress tracking and statistics
 - 🧠 Enhanced **Multi-LoRA** support with library path management
@@ -121,26 +121,29 @@ The MFLUX WebUI v0.9.3 contains the following tabs:
 
 #### Core Generation Tabs
 1. **MFLUX Easy** – quick text-to-image generation  
-2. **Advanced Generate** – full control over generation parameters  
-3. **ControlNet** – guided generation with control images  
-4. **Image-to-Image** – transform existing images  
-5. **Fill Tool (Inpaint/Outpaint)** – remove or extend content  
-6. **Depth Tool** – depth-guided generation  
-7. **Redux** – create image variations  
-8. **Upscale** – intelligent upscaling  
-9. **CatVTON** – virtual try-on  
-10. **IC-Edit** – in-context editing  
-11. **Concept Attention** – weighted prompt control  
-12. **In-Context LoRA** – apply reference styles  
-13. **Dreambooth Fine-Tuning** – train custom models  
-14. **Model & LoRA Management** – download, quantize & manage models
-15. **Kontext** – context-aware generation
+2. **Qwen Image** – text-to-image generation with the Qwen Image model (multilingual prompts, negative prompts, LoRA, quantization and optional init image)  
+3. **Qwen Image Edit** – image editing based on one or more reference images using Qwen-Image-Edit (semantic + appearance editing)  
+4. **🎨 Canvas** – node-like workflow canvas for chaining tools  
+5. **Advanced Generate** – full control over generation parameters  
+6. **ControlNet** – guided generation with control images  
+7. **Image-to-Image** – transform existing images  
+8. **Fill Tool (Inpaint/Outpaint)** – remove or extend content  
+9. **Depth Tool** – depth-guided generation  
+10. **Redux** – create image variations  
+11. **Upscale** – intelligent upscaling  
+12. **CatVTON** – virtual try-on  
+13. **IC-Edit** – in-context editing  
+14. **Concept Attention** – weighted prompt control  
+15. **In-Context LoRA** – apply reference styles  
+16. **Dreambooth Fine-Tuning** – train custom models  
+17. **Kontext** – context-aware generation  
+18. **Model & LoRA Management** – download, quantize & manage models
 
-#### New v0.9.3 Management Tabs
-16. **Auto Seeds** – intelligent seed management and auto-generation
-17. **Dynamic Prompts** – wildcard prompts, categories, and variations
-18. **Battery Monitor** – battery-aware generation control
-19. **Configuration** – advanced config management with presets
+#### New v0.9.3 Management & Workflow Tabs
+19. **Auto Seeds** – intelligent seed management and auto-generation (global workflow for all generation tabs)
+20. **Dynamic Prompts** – wildcard prompts, categories, and variations (applied in Easy, Advanced, Canvas, ControlNet, Image-to-Image and In-Context LoRA)
+21. **Battery Monitor** – battery-aware generation control
+22. **Configuration** – advanced config management with presets
 
 ## Project Structure
 
@@ -383,6 +386,36 @@ MFLUX WebUI integrates Ollama for prompt enhancement:
 - Adjust Ollama settings, including the model and system prompt, in the Ollama Settings section.
 
 ## Changelog
+
+### Qwen v3 Enhancements (Tag: `qwen3`)
+
+This tag introduces a richer Qwen workflow on top of the existing MFLUX WebUI:
+
+- **Qwen Image tab**
+  - Text-to-image generation with the Qwen Image model
+  - Supports multilingual prompts (Chinese and English), negative prompts, LoRA, quantization, seeds and multiple images per batch
+  - Optional init image input for Qwen-based image-to-image generation
+
+- **Qwen Image Edit tab**
+  - Uses `Qwen-Image-Edit` for semantic and appearance editing:
+    - Semantic edits: IP creation, viewpoint changes (90°/180° rotations), style transfer, background/clothing changes
+    - Appearance edits: add/remove elements while preserving the rest of the image
+    - Precise text editing in English and Chinese (posters, signs, etc.)
+  - Supports:
+    - Multiple reference images
+    - LoRA integration and quantization
+    - Seed control and metadata export
+
+- **Chained editing workflow**
+  - After running Qwen Image Edit, the **Use last output as input** button reuses the latest edited images as new reference images
+  - Enables step-by-step refinement workflows (e.g. progressively correcting calligraphy or fine-grained local changes)
+
+- **Region-based editing (crop helper)**
+  - A dedicated **Preview / Crop (optional)** image area in the Qwen Edit tab allows selecting a region with the selection tool
+  - The selected crop is saved and used as the sole reference image for the next Qwen-Image-Edit call
+  - This makes it easy to target specific regions (e.g. a single character, logo, or object) for precise edits
+
+These enhancements sit on top of the standard MFLUX Qwen integration and do not change the underlying Qwen models; they add a more powerful and user-friendly workflow layer around Qwen-Image and Qwen-Image-Edit.
 
 ### v0.9.3 (Latest) - Hotfix Release
 
