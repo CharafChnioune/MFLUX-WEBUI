@@ -31,6 +31,8 @@ from frontend.components.ic_edit import create_ic_edit_tab
 from frontend.components.concept_attention import create_concept_attention_tab
 from frontend.components.kontext import create_kontext_tab
 from frontend.components.canvas import create_canvas_tab
+from frontend.components.qwen_image import create_qwen_image_tab
+from frontend.components.qwen_edit import create_qwen_edit_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -102,9 +104,16 @@ from backend.post_processing import (
 
 def create_ui():
     """
-    Create the Gradio UI interface
+    Create the Gradio UI interface following the layout/theming guidance from
+    gradiodocs/docs-blocks/blocks.md and gradiodocs/guides-themes/gradio_themes.md.
     """
-    with gr.Blocks(css="""
+    theme = gr.themes.Soft()
+    with gr.Blocks(
+        theme=theme,
+        title="MFLUX WebUI",
+        fill_width=True,
+        analytics_enabled=False,
+        css="""
         .refresh-button {
             background-color: white !important;
             border: 1px solid #ccc !important;
@@ -129,12 +138,17 @@ def create_ui():
         .white-bg {
             background-color: white !important;
         }
-    """) as demo:
+    """,
+    ) as demo:
         with gr.Tabs():
             with gr.TabItem("MFLUX Easy", id=0):
                 easy_mflux_components = create_easy_mflux_tab()
                 lora_files_simple = easy_mflux_components['lora_files']
                 model_simple = easy_mflux_components['model']
+
+            # Qwen tabs directly after MFLUX Easy
+            qwen_image_components = create_qwen_image_tab()
+            qwen_edit_components = create_qwen_edit_tab()
 
             with gr.TabItem("🎨 Canvas"):
                 canvas_components = create_canvas_tab()
@@ -218,4 +232,5 @@ def create_ui():
 
 if __name__ == "__main__":
     demo = create_ui()
-    demo.queue().launch(show_error=True)
+    # Shared queue configuration per gradiodocs/guides-queuing/queuing.md
+    demo.queue(default_concurrency_limit=4, status_tracker=True).launch(show_error=True)
