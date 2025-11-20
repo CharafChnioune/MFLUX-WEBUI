@@ -75,10 +75,28 @@ If you prefer to install manually, follow these steps:
 To run the WebUI:
 
 ```
-python webui.py
+python webui.py   # starts UI + built-in API server
 ```
 
 Access the interface in your web browser at `http://localhost:7860`.
+
+#### Built-in API server
+- Auto-starts with the UI.
+- Defaults: `http://<MFLUX_API_HOST>:<MFLUX_API_PORT>` with endpoint `/sdapi/v1/txt2img` (Stable Diffusion WebUI-style).
+- Environment overrides:
+  - `MFLUX_API_HOST` (default `0.0.0.0`)
+  - `MFLUX_API_PORT` (default `7861`)
+- Example request:
+```bash
+curl -X POST http://localhost:7861/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A cat playing guitar",
+    "width": 768,
+    "height": 1024,
+    "num_images": 1
+  }'
+```
 
 ### v0.9.3 Configuration
 
