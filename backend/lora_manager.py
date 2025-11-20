@@ -10,6 +10,14 @@ from huggingface_hub import hf_hub_download, HfApi, HfFolder
 LORA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lora")
 os.makedirs(LORA_DIR, exist_ok=True)
 
+# Optional external library paths (colon/semicolon separated)
+EXTRA_LORA_DIRS = []
+env_lora = os.environ.get("LORA_LIBRARY_PATH")
+if env_lora:
+    for p in env_lora.split(os.pathsep):
+        if p.strip():
+            EXTRA_LORA_DIRS.append(os.path.expanduser(p.strip()))
+
 MAX_LORAS = 5
 
 def get_available_lora_files():
@@ -19,19 +27,20 @@ def get_available_lora_files():
     Returns:
         list: A list of tuples containing (display_name, file_path) for each .safetensors file.
     """
+    search_roots = [LORA_DIR] + [p for p in EXTRA_LORA_DIRS if os.path.isdir(p)]
     lora_files = []
-    for root, dirs, files in os.walk(LORA_DIR):
-        for file in files:
-            # Filter out .link files and only include .safetensors
-            if file.endswith(".safetensors") and not file.endswith(".link"):
-                # Remove any .link extension if it somehow got appended
-                display_name = os.path.splitext(file)[0].replace(".link", "")
-                file_path = os.path.join(root, file)
-                
-                # Skip if it's a symlink
-                if not os.path.islink(file_path):
-                    lora_files.append((display_name, file_path))
+    for root in search_roots:
+        for dirpath, _, files in os.walk(root):
+            for file in files:
+                # Filter out .link files and only include .safetensors
+                if file.endswith(".safetensors") and not file.endswith(".link"):
+                    display_name = os.path.splitext(file)[0].replace(".link", "")
+                    file_path = os.path.join(dirpath, file)
                     
+                    # Skip if it's a symlink
+                    if not os.path.islink(file_path):
+                        lora_files.append((display_name, file_path))
+                        
     # Sort alphabetically, case-insensitive
     lora_files.sort(key=lambda x: x[0].lower())
     return lora_files

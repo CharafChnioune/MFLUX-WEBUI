@@ -59,7 +59,12 @@ class ModelInfo:
 def scan_huggingface_cache(cache_dir: Optional[str] = None) -> List[ModelInfo]:
     """Scan the Hugging Face cache directory for models."""
     if cache_dir is None:
-        cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+        # Respect HF_HOME if provided, otherwise fall back to default
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            cache_dir = os.path.join(os.path.expanduser(hf_home), "hub")
+        else:
+            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
     
     cache_path = Path(cache_dir)
     if not cache_path.exists():

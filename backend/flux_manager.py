@@ -16,6 +16,7 @@ from backend.lora_manager import process_lora_files, download_lora
 from backend.ollama_manager import enhance_prompt
 from backend.prompts_manager import enhance_prompt_with_mlx
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
+from PIL import PngImagePlugin
 from backend.generation_workflow import (
     get_generation_workflow,
     check_pre_generation,
@@ -39,6 +40,23 @@ from backend.model_manager import (
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def save_image_with_metadata(pil_image, output_path: str, metadata: dict):
+    """
+    Save a PIL image with PNG textual metadata (prompt, seed, etc.).
+    Falls back to a normal save if metadata embedding fails.
+    """
+    try:
+        pnginfo = PngImagePlugin.PngInfo()
+        for key, value in metadata.items():
+            if value is None:
+                continue
+            pnginfo.add_text(str(key), str(value))
+        pil_image.save(output_path, pnginfo=pnginfo)
+    except Exception as e:
+        print(f"Warning: Failed to embed PNG metadata for {output_path}: {e}")
+        pil_image.save(output_path)
 
 def parse_image_format(image_format):
     """
@@ -221,8 +239,16 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
                 guidance=guidance,
             ),
         )
-        # Sla het GeneratedImage object op als PIL Image
-        generated.image.save(output_path)
+        meta = {
+            "prompt": prompt,
+            "seed": current_seed,
+            "steps": steps,
+            "guidance": guidance,
+            "width": width,
+            "height": height,
+            "model": getattr(flux, "model_config", None) or "",
+        }
+        save_image_with_metadata(generated.image, output_path, meta)
         images.append(generated.image)  # Gebruik .image attribuut voor PIL Image
         filenames.append(output_filename)
     
@@ -341,7 +367,16 @@ def simple_generate_image(
                     )
                     
                     pil_image = generated.image
-                    pil_image.save(output_path)
+                    meta = {
+                        "prompt": prompt,
+                        "seed": seed,
+                        "model": model,
+                        "width": width,
+                        "height": height,
+                        "steps": 4 if "schnell" in model else 20,
+                        "guidance": guidance_value,
+                    }
+                    save_image_with_metadata(pil_image, output_path, meta)
                     images.append(pil_image)
                     filenames.append(output_filename)
                     print(f"Saved image to {output_path}")
@@ -621,10 +656,6 @@ def generate_image_gradio(
                 timestamp = int(time.time())
                 filename = f"generated_{timestamp}_{current_seed}.png"
                 
-                # Save the image
-                output_path = os.path.join(OUTPUT_DIR, filename)
-                pil_image.save(output_path)
-                
                 # Prepare enhanced metadata
                 generation_metadata = {
                     "prompt": prompt,
@@ -642,6 +673,10 @@ def generate_image_gradio(
                     "low_ram_mode": low_ram,
                     "filename": filename
                 }
+                
+                # Save the image with embedded metadata
+                output_path = os.path.join(OUTPUT_DIR, filename)
+                save_image_with_metadata(pil_image, output_path, generation_metadata)
                 
                 # Save enhanced metadata using workflow
                 if metadata:
@@ -818,7 +853,19 @@ def generate_image_controlnet_gradio(
             timestamp = int(time.time())
             filename = f"controlnet_{timestamp}_{current_seed}.png"
             output_path = os.path.join(OUTPUT_DIR, filename)
-            pil_image.save(output_path)
+            meta = {
+                "prompt": prompt,
+                "seed": current_seed,
+                "steps": steps_int,
+                "guidance": guidance_value,
+                "width": width,
+                "height": height,
+                "model": model,
+                "controlnet_strength": controlnet_strength_float,
+                "lora_files": lora_paths,
+                "lora_scales": lora_scales_float,
+            }
+            save_image_with_metadata(pil_image, output_path, meta)
             
             # Save canny reference if requested
             if save_canny:
@@ -1032,7 +1079,19 @@ def generate_image_i2i_gradio(
             timestamp = int(time.time())
             filename = f"i2i_{timestamp}_{current_seed}.png"
             output_path = os.path.join(OUTPUT_DIR, filename)
-            pil_image.save(output_path)
+            meta = {
+                "prompt": prompt,
+                "seed": current_seed,
+                "steps": steps_int,
+                "guidance": guidance_value,
+                "width": width,
+                "height": height,
+                "model": model,
+                "image_strength": image_strength_float,
+                "lora_files": lora_paths,
+                "lora_scales": lora_scales_float,
+            }
+            save_image_with_metadata(pil_image, output_path, meta)
             
             # Save metadata if requested
             if metadata:
@@ -1237,7 +1296,18 @@ def generate_image_in_context_lora_gradio(
             timestamp = int(time.time())
             filename = f"in_context_{timestamp}_{current_seed}.png"
             output_path = os.path.join(OUTPUT_DIR, filename)
-            pil_image.save(output_path)
+            meta = {
+                "prompt": prompt,
+                "seed": current_seed,
+                "steps": steps_int,
+                "guidance": guidance_value,
+                "width": width,
+                "height": height,
+                "model": model,
+                "lora_style": lora_style,
+                "generation_time": str(time.ctime()),
+            }
+            save_image_with_metadata(pil_image, output_path, meta)
             
             # Save metadata if requested
             if metadata:
