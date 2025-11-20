@@ -98,6 +98,31 @@ curl -X POST http://localhost:7861/sdapi/v1/txt2img \
   }'
 ```
 
+## API (Stable Diffusion WebUI style)
+
+The built-in API mirrors the SD WebUI txt2img endpoint for simple automation.
+
+- **Base URL:** `http://<MFLUX_API_HOST>:<MFLUX_API_PORT>` (defaults: `0.0.0.0:7861`)
+- **Endpoint:** `POST /sdapi/v1/txt2img`
+- **Request JSON fields:**
+  - `prompt` (string, required)
+  - `seed` (int | string, optional)
+  - `width`, `height` (int, optional, defaults 576x1024)
+  - `steps` (int or string, optional; blank uses model default)
+  - `guidance` (float, optional; default 3.5)
+  - `num_images` (int, optional; default 1)
+  - `model` (string, optional; default `schnell-4-bit`)
+  - `auto_seeds` (bool, optional)
+  - `lora_files` (array of strings, optional; names or paths)
+  - `low_ram` (bool, optional)
+- **Response JSON:**
+  - `images`: array of base64-encoded PNGs
+  - `parameters`: echo of the request payload
+  - `info`: text summary from the generation call
+  - `prompt`: the prompt actually used (after dynamic processing)
+
+Run only the API (skip UI) by importing and calling `backend.api_server.run_server(host, port)` in your own launcher if needed.
+
 ### v0.9.3 Configuration
 
 After installation, you may want to configure the new v0.9.3 features:
