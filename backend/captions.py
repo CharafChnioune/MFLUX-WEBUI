@@ -8,21 +8,39 @@ from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.utils import load_config
 import gradio as gr
 
+# Fallback models for captioning if the primary one fails (AudioModel AttributeError, etc.)
+CAPTION_MODEL_CANDIDATES = [
+    "mlx-community/Florence-2-large-ft-bf16",  # primary
+    "mlx-community/Florence-2-base-ft",        # fallback
+    "mlx-community/Florence-2-base",           # secondary fallback
+]
+ENV_MODEL = os.environ.get("MLX_VLM_CAPTION_MODEL")
+if ENV_MODEL:
+    CAPTION_MODEL_CANDIDATES = [ENV_MODEL] + [m for m in CAPTION_MODEL_CANDIDATES if m != ENV_MODEL]
+
 @lru_cache(maxsize=1)
-def load_caption_model(model_path="mlx-community/Florence-2-large-ft-bf16"):
+def load_caption_model():
     """
-    Load MLX-VLM model for image captioning.
+    Load MLX-VLM model for image captioning with fallbacks to avoid AudioModel errors.
+    Respects optional env override MLX_VLM_CAPTION_MODEL.
     """
-    try:
-        print(f"Loading caption model: {model_path}")
-        model, processor = load(model_path, trust_remote_code=True, processor_config={"trust_remote_code": True})
-        config = load_config(model_path)
-        print("Caption model loaded successfully")
-        return model, processor, config
-    except Exception as e:
-        print(f"Error loading caption model: {str(e)}")
+    last_error = None
+    for candidate in CAPTION_MODEL_CANDIDATES:
+        try:
+            print(f"Loading caption model: {candidate}")
+            model, processor = load(candidate, trust_remote_code=True, processor_config={"trust_remote_code": True})
+            config = load_config(candidate)
+            print(f"Caption model loaded successfully: {candidate}")
+            return model, processor, config
+        except Exception as e:
+            last_error = e
+            print(f"Error loading caption model {candidate}: {str(e)}")
+            traceback.print_exc()
+            continue
+    print("All caption model candidates failed to load.")
+    if last_error:
         traceback.print_exc()
-        return None, None, None
+    return None, None, None
 
 def generate_caption(image_path, model, processor, config=None):
     """
