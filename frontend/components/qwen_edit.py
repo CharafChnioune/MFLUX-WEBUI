@@ -24,7 +24,6 @@ def create_qwen_edit_tab():
         preview_image = gr.Image(
             label="Preview / Crop (optional)",
             type="pil",
-            tool="select",
         )
 
         with gr.Row():
