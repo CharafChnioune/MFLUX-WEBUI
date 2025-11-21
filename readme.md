@@ -100,26 +100,23 @@ curl -X POST http://localhost:7861/sdapi/v1/txt2img \
 
 ## API (Stable Diffusion WebUI style)
 
-The built-in API mirrors the SD WebUI txt2img endpoint for simple automation.
+The built-in API mirrors SD WebUI-style endpoints for automation.
 
 - **Base URL:** `http://<MFLUX_API_HOST>:<MFLUX_API_PORT>` (defaults: `0.0.0.0:7861`)
-- **Endpoint:** `POST /sdapi/v1/txt2img`
-- **Request JSON fields:**
-  - `prompt` (string, required)
-  - `seed` (int | string, optional)
-  - `width`, `height` (int, optional, defaults 576x1024)
-  - `steps` (int or string, optional; blank uses model default)
-  - `guidance` (float, optional; default 3.5)
-  - `num_images` (int, optional; default 1)
-  - `model` (string, optional; default `schnell-4-bit`)
-  - `auto_seeds` (bool, optional)
-  - `lora_files` (array of strings, optional; names or paths)
-  - `low_ram` (bool, optional)
-- **Response JSON:**
+- **Endpoints:**
+  - `POST /sdapi/v1/txt2img`
+    - Fields: `prompt` (required), `seed`, `width`, `height`, `steps`, `guidance`, `num_images`, `model`, `auto_seeds`, `lora_files`, `low_ram`
+  - `POST /sdapi/v1/img2img`
+    - Fields: `prompt` (required), `init_images` (array base64, required), `seed`, `width`, `height`, `steps`, `guidance`, `image_strength`, `num_images`, `model`, `auto_seeds`, `lora_files`, `low_ram`
+  - `POST /sdapi/v1/controlnet`
+    - Fields: `prompt` (required), `controlnet_image` / `controlnet_images` / `init_images` (array base64, required), `seed`, `width`, `height`, `steps`, `guidance`, `controlnet_strength`, `model`, `lora_files`, `low_ram`
+  - `POST /api/upscale`
+    - Fields: `image` (base64, required), `upscale_factor` (default 2), `output_format` (PNG/JPEG/WebP), `metadata` (bool)
+- **Response JSON (generation endpoints):**
   - `images`: array of base64-encoded PNGs
   - `parameters`: echo of the request payload
   - `info`: text summary from the generation call
-  - `prompt`: the prompt actually used (after dynamic processing)
+  - `prompt`: the prompt actually used (where applicable)
 
 Run only the API (skip UI) by importing and calling `backend.api_server.run_server(host, port)` in your own launcher if needed.
 
