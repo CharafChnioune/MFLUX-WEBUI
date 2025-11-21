@@ -240,14 +240,25 @@ def create_upscale_tab():
             orig_w, orig_h = image.size
             
             if use_custom:
-                new_w, new_h = int(custom_w), int(custom_h)
+                try:
+                    new_w, new_h = int(custom_w), int(custom_h)
+                except Exception:
+                    return "Invalid custom width/height"
             else:
-                new_w = orig_w * scale_factor
-                new_h = orig_h * scale_factor
+                try:
+                    # scale_factor may come in as str; cast to float
+                    sf = float(scale_factor)
+                except Exception:
+                    return "Invalid scale factor"
+                new_w = int(orig_w * sf)
+                new_h = int(orig_h * sf)
             
             info = f"Original: {orig_w}x{orig_h}\n"
             info += f"Target: {new_w}x{new_h}\n"
-            info += f"Scale: {new_w/orig_w:.2f}x"
+            try:
+                info += f"Scale: {new_w/float(orig_w):.2f}x"
+            except Exception:
+                info += "Scale: n/a"
             
             return info
         
