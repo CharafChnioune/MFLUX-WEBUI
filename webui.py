@@ -1,6 +1,8 @@
 import sys
 import threading
 import os
+import subprocess
+import importlib
 from pathlib import Path
 
 # Ensure local mflux sources are available before importing any UI modules.
@@ -10,6 +12,31 @@ if local_mflux.exists():
     local_path = str(local_mflux)
     if local_path not in sys.path:
         sys.path.insert(0, local_path)
+
+
+def _ensure_gradio():
+    """
+    Ensure gradio is available. If missing, attempt to install from requirements.txt,
+    otherwise install the pinned minimum version.
+    """
+    try:
+        return importlib.import_module("gradio")
+    except ImportError:
+        print("[Setup] gradio not found. Attempting installation...")
+        req_path = repo_root / "requirements.txt"
+        try:
+            if req_path.exists():
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(req_path)])
+            else:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "gradio>=5.35.0"])
+        except Exception as exc:
+            print(f"[Setup] Automatic gradio install failed: {exc}")
+            print("[Setup] Please run: pip install -r requirements.txt")
+            raise
+        return importlib.import_module("gradio")
+
+# Ensure gradio is ready before the UI import
+_ensure_gradio()
 
 from frontend.gradioui import create_ui
 from backend.api_server import run_server as run_api_server
