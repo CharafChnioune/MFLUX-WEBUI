@@ -232,6 +232,21 @@ def create_upscale_tab():
         
         def show_batch_section():
             return gr.update(visible=True)
+
+        def parse_scale_value(raw_value):
+            """
+            Parse scale factor inputs like '2x', '1.5', or numeric values.
+            Falls back to 1.0 on bad input to avoid UI crashes.
+            """
+            try:
+                if isinstance(raw_value, str):
+                    val = raw_value.strip().lower()
+                    if val.endswith("x"):
+                        val = val[:-1]
+                    return float(val)
+                return float(raw_value)
+            except Exception:
+                return 1.0
         
         def calculate_dimensions(image, scale_factor, use_custom, custom_w, custom_h):
             if image is None:
@@ -246,8 +261,7 @@ def create_upscale_tab():
                     return "Invalid custom width/height"
             else:
                 try:
-                    # scale_factor may come in as str; cast to float
-                    sf = float(scale_factor)
+                    sf = parse_scale_value(scale_factor)
                 except Exception:
                     return "Invalid scale factor"
                 new_w = int(orig_w * sf)
@@ -311,8 +325,9 @@ def create_upscale_tab():
                     width, height = int(target_width), int(target_height)
                 else:
                     orig_w, orig_h = input_image.size
-                    width = orig_w * scale_factor
-                    height = orig_h * scale_factor
+                    sf = parse_scale_value(scale_factor)
+                    width = int(orig_w * sf)
+                    height = int(orig_h * sf)
                 
                 status_msg = f"Upscaling to {width}x{height}..."
                 yield None, status_msg, resolution_info.value

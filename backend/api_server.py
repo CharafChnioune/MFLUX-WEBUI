@@ -69,6 +69,14 @@ def _save_temp_image(img: Image.Image) -> str:
 
 
 class APIServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/sdapi/v1/options":
+            return self.handle_options()
+        if parsed.path == "/sdapi/v1/sd-models":
+            return self.handle_models()
+        return _bad_request(self, "Unknown endpoint", status=404)
+
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path == "/sdapi/v1/txt2img":
@@ -305,6 +313,36 @@ class APIServer(BaseHTTPRequestHandler):
             "parameters": data,
         }
         return _json_response(self, response)
+
+    def handle_options(self):
+        """
+        Minimal SD WebUI-compatible options endpoint so clients like Open WebUI
+        can validate connectivity.
+        """
+        options = {
+            "sd_model_checkpoint": "flux-dev",
+            "sd_model_checkpoint_hash": "",
+            "sd_vae": "auto",
+            "CLIP_stop_at_last_layers": 2,
+            "inpainting_fill": 1,
+        }
+        return _json_response(self, options)
+
+    def handle_models(self):
+        """
+        Minimal model list endpoint for compatibility.
+        """
+        models = [
+            {
+                "title": "flux-dev",
+                "model_name": "flux-dev",
+                "hash": "",
+                "sha256": "",
+                "filename": "flux-dev",
+                "config": "",
+            }
+        ]
+        return _json_response(self, models)
 
 
 def run_server(host: str = HOST, port: int = PORT):

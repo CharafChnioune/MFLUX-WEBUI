@@ -8,6 +8,7 @@ from PIL import Image
 import numpy as np
 from pathlib import Path
 import json
+import tempfile
 from mflux.config.config import Config
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
 from backend.flux_manager import parse_scale_factor
@@ -283,3 +284,131 @@ def batch_upscale_gradio(
         import traceback
         traceback.print_exc()
         return [], f"Error: {str(e)}"
+
+def _resolve_image_path(input_image):
+    """
+    Accepts a PIL image, file-like object, or path-like input and returns a tuple of
+    (path_to_image, temp_file_path). If a temp file is created, caller should clean it up.
+    """
+    temp_path = None
+
+    # Gradio may pass PIL.Image or a dict with a "name" field; handle both.
+    if isinstance(input_image, Image.Image):
+        fd, temp_path = tempfile.mkstemp(suffix=".png")
+        with os.fdopen(fd, "wb") as f:
+            input_image.save(f, format="PNG")
+        image_path = temp_path
+    elif isinstance(input_image, dict) and input_image.get("name"):
+        image_path = input_image["name"]
+    elif hasattr(input_image, "name"):
+        image_path = input_image.name
+    else:
+        image_path = input_image
+
+    return image_path, temp_path
+
+
+def upscale_single_gradio(
+    input_image,
+    prompt=None,
+    model_name="dev",
+    target_width=None,
+    target_height=None,
+    seed=None,
+    guidance=None,
+    steps=None,
+    controlnet_strength=None,
+    vae_tiling=False,
+    vae_tiling_split="horizontal",
+    save_metadata=True,
+    low_ram_mode=False,
+    quantize=None,
+):
+    """
+    Compatibility wrapper used by the Gradio Upscale tab.
+    Accepts the wider parameter set but delegates to the lightweight upscaler.
+    """
+    temp_path = None
+    try:
+        image_path, temp_path = _resolve_image_path(input_image)
+
+        # Ensure we have sensible target dimensions; fall back to the source image size.
+        with Image.open(image_path) as img:
+            orig_w, orig_h = img.size
+        target_width = target_width or orig_w
+        target_height = target_height or orig_h
+
+        result_image, info = upscale_with_custom_dimensions_gradio(
+            input_image=image_path,
+            target_width=target_width,
+            target_height=target_height,
+            output_format="PNG",
+            metadata=save_metadata,
+        )
+        return result_image, info
+    except Exception as e:
+        print(f"Error in upscale_single_gradio: {str(e)}")
+        traceback.print_exc()
+        return None, f"Error: {str(e)}"
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def upscale_batch_gradio(
+    image_files,
+    prompt=None,
+    model_name="dev",
+    scale_factor="2x",
+    seed=None,
+    guidance=None,
+    steps=None,
+    controlnet_strength=None,
+    vae_tiling=False,
+    vae_tiling_split="horizontal",
+    save_metadata=True,
+    low_ram_mode=False,
+    quantize=None,
+    progress_callback=None,
+):
+    """
+    Batch upscale wrapper to match the Gradio expectations.
+    Uses a single scale factor for all images and returns a list of upscaled PIL images.
+    """
+    if not image_files:
+        return []
+
+    results = []
+    for idx, img_input in enumerate(image_files):
+        if progress_callback:
+            try:
+                progress_callback(idx)
+            except Exception:
+                pass
+
+        img_path, tmp_path = _resolve_image_path(img_input)
+        try:
+            with Image.open(img_path) as img:
+                target_w = parse_scale_factor(scale_factor, img.width)
+                target_h = parse_scale_factor(scale_factor, img.height)
+
+            upscaled, _ = upscale_with_custom_dimensions_gradio(
+                input_image=img_path,
+                target_width=target_w,
+                target_height=target_h,
+                output_format="PNG",
+                metadata=save_metadata,
+            )
+            if upscaled:
+                results.append(upscaled)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    return results
