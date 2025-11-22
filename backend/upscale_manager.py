@@ -21,24 +21,31 @@ def upscale_image(image_path, upscale_factor=2):
     Upscale an image using MFLUX upscaler.
     """
     try:
-        from mflux.upscaler.upscaler import Upscaler
-        
+        from mflux.upscaler.upscaler import Upscaler  # type: ignore
+
         # Load the image
         image = Image.open(image_path).convert("RGB")
-        
+
         # Initialize upscaler
         upscaler = Upscaler()
-        
+
         # Upscale the image
         upscaled = upscaler.upscale(image, scale_factor=upscale_factor)
-        
+
         return upscaled
-        
+
     except Exception as e:
-        print(f"Error upscaling image: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+        # Fallback to simple PIL resize if mflux upscaler is unavailable.
+        print(f"Upscaler unavailable, falling back to PIL resize: {str(e)}")
+        try:
+            image = Image.open(image_path).convert("RGB")
+            w, h = image.size
+            return image.resize((int(w * upscale_factor), int(h * upscale_factor)), Image.Resampling.LANCZOS)
+        except Exception as fallback_exc:
+            print(f"Error upscaling image: {str(fallback_exc)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 def upscale_image_gradio(
     input_image, upscale_factor, output_format, metadata
