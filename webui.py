@@ -19,6 +19,31 @@ def _ensure_gradio():
     Ensure gradio is available. If missing, attempt to install from requirements.txt,
     otherwise install the pinned minimum version.
     """
+    def _pip_install(args):
+        """
+        Run pip with PEP 668-friendly settings. If direct install fails, create a
+        local venv (.venv) and install there, then add it to sys.path.
+        """
+        base_cmd = [sys.executable, "-m", "pip"] + args
+        env = os.environ.copy()
+        env.setdefault("PIP_BREAK_SYSTEM_PACKAGES", "1")
+        try:
+            subprocess.check_call(base_cmd, env=env)
+            return
+        except subprocess.CalledProcessError:
+            pass
+
+        # Fallback: create a repo-local virtualenv and install there
+        venv_dir = repo_root / ".venv"
+        venv_python = venv_dir / "bin" / "python3"
+        if not venv_python.exists():
+            subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
+        subprocess.check_call([str(venv_python), "-m", "pip", "install"] + args[1:])
+
+        site_packages = venv_dir / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+        if site_packages.exists():
+            sys.path.insert(0, str(site_packages))
+
     try:
         return importlib.import_module("gradio")
     except ImportError:
@@ -26,12 +51,12 @@ def _ensure_gradio():
         req_path = repo_root / "requirements.txt"
         try:
             if req_path.exists():
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(req_path)])
+                _pip_install(["install", "-r", str(req_path)])
             else:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "gradio>=5.35.0"])
+                _pip_install(["install", "gradio>=5.35.0"])
         except Exception as exc:
             print(f"[Setup] Automatic gradio install failed: {exc}")
-            print("[Setup] Please run: pip install -r requirements.txt")
+            print("[Setup] Please run: python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt")
             raise
         return importlib.import_module("gradio")
 
