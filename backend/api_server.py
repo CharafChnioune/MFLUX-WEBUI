@@ -27,9 +27,82 @@ from backend.flux_manager import (
     generate_image_controlnet_gradio,
 )
 from backend import upscale_manager
+from backend.model_manager import get_updated_models, get_custom_model_config
 
 HOST = "0.0.0.0"
 PORT = 7861
+DEFAULT_MODEL = "schnell-4-bit"
+_CURRENT_MODEL = None
+
+
+def _current_model():
+    """Return the currently selected model, falling back to the first available."""
+    global _CURRENT_MODEL
+    if _CURRENT_MODEL:
+        return _CURRENT_MODEL
+    try:
+        available = get_updated_models()
+        if DEFAULT_MODEL in available:
+            _CURRENT_MODEL = DEFAULT_MODEL
+        elif available:
+            _CURRENT_MODEL = available[0]
+        else:
+            _CURRENT_MODEL = DEFAULT_MODEL
+    except Exception:
+        _CURRENT_MODEL = DEFAULT_MODEL
+    return _CURRENT_MODEL
+
+
+def _set_current_model(model_name: str | None):
+    global _CURRENT_MODEL
+    if not model_name:
+        return
+    _CURRENT_MODEL = model_name
+
+
+def _resolve_model_from_payload(data: dict) -> str:
+    """
+    Open WebUI may send either `model` or the SD-WebUI compatible
+    `sd_model_checkpoint`, sometimes nested in override_settings. Prefer
+    explicit request and fall back to the selected model.
+    """
+    requested = data.get("model") or data.get("sd_model_checkpoint")
+    override_settings = data.get("override_settings") or {}
+    requested = requested or override_settings.get("sd_model_checkpoint")
+    if isinstance(requested, str) and requested.strip():
+        return requested.strip()
+    return _current_model()
+
+
+def _list_models_payload():
+    """
+    Return SD WebUI style model descriptors for available aliases.
+    """
+    models = []
+    try:
+        aliases = get_updated_models()
+    except Exception:
+        aliases = [DEFAULT_MODEL]
+
+    for alias in aliases:
+        try:
+            cfg = get_custom_model_config(alias)
+            model_name = cfg.model_name
+            base_arch = cfg.base_arch
+        except Exception:
+            model_name = alias
+            base_arch = ""
+        models.append(
+            {
+                "title": alias,
+                "model_name": model_name,
+                "hash": "",
+                "sha256": "",
+                "filename": alias,
+                "config": base_arch,
+            }
+        )
+    return models
 
 
 def _bad_request(handler, message, status=400):
@@ -87,6 +160,8 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_controlnet()
         if parsed.path == "/api/upscale":
             return self.handle_upscale()
+        if parsed.path == "/sdapi/v1/options":
+            return self.handle_options_update()
         return _bad_request(self, "Unknown endpoint", status=404)
 
     def _read_json(self):
@@ -107,7 +182,7 @@ class APIServer(BaseHTTPRequestHandler):
         if not prompt:
             return _bad_request(self, "prompt is required")
 
-        model = data.get("model") or "schnell-4-bit"
+        model = _resolve_model_from_payload(data)
         seed = data.get("seed")
         width = int(data.get("width", 576))
         height = int(data.get("height", 1024))
@@ -168,7 +243,7 @@ class APIServer(BaseHTTPRequestHandler):
         except Exception as exc:
             return _bad_request(self, f"Invalid init image: {exc}")
 
-        model = data.get("model") or "schnell-4-bit"
+        model = _resolve_model_from_payload(data)
         seed = data.get("seed")
         width = int(data.get("width", init_img.width))
         height = int(data.get("height", init_img.height))
@@ -229,7 +304,7 @@ class APIServer(BaseHTTPRequestHandler):
         except Exception as exc:
             return _bad_request(self, f"Invalid controlnet image: {exc}")
 
-        model = data.get("model") or "schnell-4-bit"
+        model = _resolve_model_from_payload(data)
         seed = data.get("seed")
         width = int(data.get("width", controlnet_img.width))
         height = int(data.get("height", controlnet_img.height))
@@ -320,7 +395,7 @@ class APIServer(BaseHTTPRequestHandler):
         can validate connectivity.
         """
         options = {
-            "sd_model_checkpoint": "flux-dev",
+            "sd_model_checkpoint": _current_model(),
             "sd_model_checkpoint_hash": "",
             "sd_vae": "auto",
             "CLIP_stop_at_last_layers": 2,
@@ -328,21 +403,27 @@ class APIServer(BaseHTTPRequestHandler):
         }
         return _json_response(self, options)
 
+    def handle_options_update(self):
+        """
+        Accept SD WebUI-style options updates (primarily model selection).
+        """
+        try:
+            data = self._read_json()
+        except Exception as exc:
+            return _bad_request(self, str(exc))
+
+        requested_model = data.get("sd_model_checkpoint")
+        if requested_model:
+            _set_current_model(str(requested_model))
+
+        # Return updated options snapshot
+        return self.handle_options()
+
     def handle_models(self):
         """
         Minimal model list endpoint for compatibility.
         """
-        models = [
-            {
-                "title": "flux-dev",
-                "model_name": "flux-dev",
-                "hash": "",
-                "sha256": "",
-                "filename": "flux-dev",
-                "config": "",
-            }
-        ]
-        return _json_response(self, models)
+        return _json_response(self, _list_models_payload())
 
 
 def run_server(host: str = HOST, port: int = PORT):

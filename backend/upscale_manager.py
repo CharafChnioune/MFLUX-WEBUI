@@ -15,43 +15,65 @@ from backend.flux_manager import parse_scale_factor
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+_UPSCALE_MODEL = None
+UPSCALE_STEPS = int(os.getenv("MFLUX_UPSCALE_STEPS", "12"))
+UPSCALE_STRENGTH = float(os.getenv("MFLUX_UPSCALE_STRENGTH", "0.75"))
+UPSCALE_QUANTIZE = os.getenv("MFLUX_UPSCALE_QUANTIZE")
+
+
+def _get_quantize_value():
+    if UPSCALE_QUANTIZE is None or UPSCALE_QUANTIZE == "":
+        return None
+    try:
+        return int(UPSCALE_QUANTIZE)
+    except ValueError:
+        return None
+
+
+def _get_upscale_model():
+    """
+    Lazily load the Flux ControlNet upscaler. Fails quietly and allows PIL fallback.
+    """
+    global _UPSCALE_MODEL
+    if _UPSCALE_MODEL is not None:
+        return _UPSCALE_MODEL
+    try:
+        # Import lazily so environments without controlnet support still run with PIL fallback.
+        try:
+            from mflux.controlnet.flux_controlnet import Flux1Controlnet
+            from mflux.config.model_config import ModelConfig
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.controlnet.flux_controlnet import Flux1Controlnet  # type: ignore
+            from mflux.config.model_config import ModelConfig  # type: ignore
+
+        _UPSCALE_MODEL = Flux1Controlnet(
+            model_config=ModelConfig.dev_controlnet_upscaler(),
+            quantize=_get_quantize_value(),
+            local_path=None,
+            lora_paths=None,
+            lora_scales=None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Upscaler unavailable, falling back to PIL resize: {exc}")
+        _UPSCALE_MODEL = None
+    return _UPSCALE_MODEL
 
 def upscale_image(image_path, upscale_factor=2):
     """
-    Upscale an image using MFLUX upscaler.
+    Upscale an image using a local resampling upscaler (LANCZOS).
     """
-    try:
-        from mflux.upscaler.upscaler import Upscaler  # type: ignore
-
-        # Load the image
-        image = Image.open(image_path).convert("RGB")
-
-        # Initialize upscaler
-        upscaler = Upscaler()
-
-        # Upscale the image
-        upscaled = upscaler.upscale(image, scale_factor=upscale_factor)
-
-        return upscaled
-
-    except Exception as e:
-        # Fallback to simple PIL resize if mflux upscaler is unavailable.
-        print(f"Upscaler unavailable, falling back to PIL resize: {str(e)}")
-        try:
-            image = Image.open(image_path).convert("RGB")
-            w, h = image.size
-            return image.resize((int(w * upscale_factor), int(h * upscale_factor)), Image.Resampling.LANCZOS)
-        except Exception as fallback_exc:
-            print(f"Error upscaling image: {str(fallback_exc)}")
-            import traceback
-            traceback.print_exc()
-            return None
+    image = Image.open(image_path).convert("RGB")
+    w, h = image.size
+    new_w = int(w * upscale_factor)
+    new_h = int(h * upscale_factor)
+    return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
 def upscale_image_gradio(
     input_image, upscale_factor, output_format, metadata
 ):
     """
-    Upscale an image using the MFLUX upscaler.
+    Upscale an image using the Flux ControlNet upscaler when available,
+    falling back to high-quality PIL resize when not.
     """
     try:
         # Parse inputs
@@ -82,13 +104,41 @@ def upscale_image_gradio(
         # Validate upscale factor
         if upscale_factor_int not in [2, 3, 4]:
             return None, "Error: Upscale factor must be 2, 3, or 4"
-            
-        # Upscale the image
-        print(f"Upscaling image with factor {upscale_factor_int}x")
-        upscaled_image = upscale_image(input_image, upscale_factor_int)
-        
+
+        target_w = int(original_width * upscale_factor_int)
+        target_h = int(original_height * upscale_factor_int)
+
+        # Try high-quality Flux upscaler first
+        upscaled_image = None
+        status_detail = None
+        flux_model = _get_upscale_model()
+
+        if flux_model:
+            try:
+                generated = flux_model.generate_image(
+                    seed=int(time.time()),
+                    prompt="High quality detailed image",
+                    controlnet_image_path=input_image,
+                    config=Config(
+                        num_inference_steps=UPSCALE_STEPS,
+                        height=target_h,
+                        width=target_w,
+                        controlnet_strength=UPSCALE_STRENGTH,
+                    ),
+                )
+                upscaled_image = generated.image
+                status_detail = "Flux ControlNet upscaler"
+            except Exception as exc:  # noqa: BLE001
+                status_detail = f"Upscaler unavailable, falling back to PIL resize: {exc}"
+                print(status_detail)
+                upscaled_image = None
+
         if upscaled_image is None:
-            return None, "Error: Failed to upscale image"
+            print(f"Upscaling image with factor {upscale_factor_int}x using PIL")
+            upscaled_image = upscale_image(input_image, upscale_factor_int)
+            if upscaled_image is None:
+                return None, "Error: Failed to upscale image"
+            status_detail = status_detail or "PIL LANCZOS resize"
             
         # Save the upscaled image
         timestamp = int(time.time())
@@ -132,6 +182,8 @@ def upscale_image_gradio(
         
         # Return both the image and a success message
         info_message = f"Successfully upscaled image {upscale_factor_int}x to {upscaled_image.width}x{upscaled_image.height}"
+        if status_detail:
+            info_message = f"{info_message} ({status_detail})"
         return upscaled_image, info_message
         
     except Exception as e:
