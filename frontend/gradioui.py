@@ -6,7 +6,6 @@ import random
 import gradio as gr
 from pathlib import Path
 from PIL import Image
-from mflux.config.config import Config
 from typing import List, Tuple
 
 # Import components
@@ -32,6 +31,8 @@ from frontend.components.kontext import create_kontext_tab
 from frontend.components.canvas import create_canvas_tab
 from frontend.components.qwen_image import create_qwen_image_tab
 from frontend.components.qwen_edit import create_qwen_edit_tab
+from frontend.components.fibo import create_fibo_tab
+from frontend.components.z_image_turbo import create_z_image_turbo_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -105,14 +106,10 @@ def create_ui():
     """
     Create the Gradio UI interface following the layout/theming guidance from
     gradiodocs/docs-blocks/blocks.md and gradiodocs/guides-themes/gradio_themes.md.
+    Theme/CSS are returned so callers can pass them to launch() (Gradio 6+).
     """
     theme = gr.themes.Soft()
-    with gr.Blocks(
-        theme=theme,
-        title="MFLUX WebUI",
-        fill_width=True,
-        analytics_enabled=False,
-        css="""
+    custom_css = """
         .refresh-button {
             background-color: white !important;
             border: 1px solid #ccc !important;
@@ -137,7 +134,12 @@ def create_ui():
         .white-bg {
             background-color: white !important;
         }
-    """,
+    """
+
+    with gr.Blocks(
+        title="MFLUX WebUI",
+        fill_width=True,
+        analytics_enabled=False,
     ) as demo:
         with gr.Tabs():
             with gr.TabItem("MFLUX Easy", id=0):
@@ -148,6 +150,10 @@ def create_ui():
             # Qwen tabs directly after MFLUX Easy
             qwen_image_components = create_qwen_image_tab()
             qwen_edit_components = create_qwen_edit_tab()
+
+            # New model tabs
+            fibo_components = create_fibo_tab()
+            z_image_components = create_z_image_turbo_tab()
 
             with gr.TabItem("🎨 Canvas"):
                 canvas_components = create_canvas_tab()
@@ -224,9 +230,14 @@ def create_ui():
                     model_icl=model_icl
                 )
 
-        return demo
+        return demo, theme, custom_css
 
 if __name__ == "__main__":
     demo = create_ui()
     # Shared queue configuration per gradiodocs/guides-queuing/queuing.md
-    demo.queue(default_concurrency_limit=4, status_tracker=True).launch(show_error=True)
+    try:
+        queue_concurrency = int(os.environ.get("MFLUX_QUEUE_CONCURRENCY", "4"))
+    except ValueError:
+        queue_concurrency = 4
+    queue_status = os.environ.get("MFLUX_QUEUE_STATUS", "true").lower() in {"1", "true", "yes", "on"}
+    demo.queue(default_concurrency_limit=queue_concurrency, status_tracker=queue_status).launch(show_error=True)

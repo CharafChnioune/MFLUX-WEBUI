@@ -5,13 +5,13 @@ import random
 import traceback
 import mlx.core as mx
 from PIL import Image
-from mflux.config.config import Config
+from backend.mflux_compat import ModelConfig
 try:
-    from mflux.flux.flux import Flux1
-    from mflux.controlnet.flux_controlnet import Flux1Controlnet
-except ModuleNotFoundError:
     from mflux.models.flux.variants.txt2img.flux import Flux1
     from mflux.models.flux.variants.controlnet.flux_controlnet import Flux1Controlnet
+except ModuleNotFoundError:
+    from mflux.flux.flux import Flux1  # type: ignore
+    from mflux.controlnet.flux_controlnet import Flux1Controlnet  # type: ignore
 from backend.lora_manager import process_lora_files, download_lora
 from backend.ollama_manager import enhance_prompt
 from backend.prompts_manager import enhance_prompt_with_mlx
@@ -32,10 +32,10 @@ import numpy as np
 import re
 from typing import Union, Tuple, Optional
 from backend.model_manager import (
-    CustomModelConfig,
-    get_custom_model_config,
     resolve_local_path,
     normalize_base_model_choice,
+    resolve_mflux_model_config,
+    strip_quant_suffix,
 )
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
@@ -132,31 +132,10 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
     Create or retrieve a Flux1 instance.
     """
     try:
-        base_model = model.replace("-8-bit", "").replace("-4-bit", "").replace("-6-bit", "").replace("-3-bit", "")
-        
-        try:
-            custom_config = get_custom_model_config(base_model)
-            if base_model_override and base_model_override != custom_config.base_arch:
-                custom_config = CustomModelConfig(
-                    model_name=custom_config.model_name,
-                    alias=custom_config.alias,
-                    num_train_steps=custom_config.num_train_steps,
-                    max_sequence_length=custom_config.max_sequence_length,
-                    base_arch=base_model_override,
-                    local_dir=custom_config.local_dir,
-                )
-            model_path = str(custom_config.local_dir) if custom_config.local_dir else None
-        except ValueError:
-            local_dir = resolve_local_path(base_model)
-            custom_config = CustomModelConfig(
-                model_name=base_model,
-                alias=base_model,
-                num_train_steps=1000,
-                max_sequence_length=512,
-                base_arch=base_model_override or "schnell",
-                local_dir=local_dir,
-            )
-            model_path = str(local_dir) if local_dir else None
+        base_model = strip_quant_suffix(model)
+        base_model_override = normalize_base_model_choice(base_model_override)
+        model_path = resolve_local_path(base_model)
+        model_config = resolve_mflux_model_config(base_model, base_model_override)
 
         if "-8-bit" in model:
             quantize = 8
@@ -170,7 +149,17 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
             quantize = None
 
         FluxClass = Flux1Controlnet if is_controlnet else Flux1
-        print(f"Creating {FluxClass.__name__} with model_config={custom_config}, quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, lora_scales={lora_scales}")
+        if is_controlnet:
+            if (base_model_override or base_model).startswith("schnell"):
+                model_config = ModelConfig.schnell_controlnet_canny()
+            else:
+                model_config = ModelConfig.dev_controlnet_canny()
+        elif base_model == "seedvr2":
+            try:
+                model_config = ModelConfig.seedvr2_3b()
+            except Exception:
+                model_config = getattr(ModelConfig, "seedvr2", lambda: None)()
+        print(f"Creating {FluxClass.__name__} with model_config={model_config}, quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, lora_scales={lora_scales}")
         try:
             # Special handling for lora_scales to work with mflux library's internals.
             # mflux library does: flux_model.lora_scales = (lora_scales or []) + [1.0] * len(hf_lora_paths)
@@ -186,13 +175,22 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
             elif isinstance(lora_scales, tuple):
                 lora_scales = list(lora_scales)
             
-            flux = FluxClass(
-                model_config=custom_config,
-                quantize=quantize,
-                local_path=model_path,
-                lora_paths=lora_paths,
-                lora_scales=lora_scales
-            )
+            try:
+                flux = FluxClass(
+                    model_config=model_config,
+                    quantize=quantize,
+                    model_path=str(model_path) if model_path else None,
+                    lora_paths=lora_paths,
+                    lora_scales=lora_scales,
+                )
+            except TypeError:
+                flux = FluxClass(
+                    model_config=model_config,
+                    quantize=quantize,
+                    local_path=str(model_path) if model_path else None,
+                    lora_paths=lora_paths,
+                    lora_scales=lora_scales,
+                )
             return flux
         except Exception as e:
             print(f"Error instantiating {FluxClass.__name__}: {str(e)}")
@@ -232,12 +230,10 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
         generated = flux.generate_image(
             seed=current_seed,
             prompt=prompt,
-            config=Config(
-                num_inference_steps=steps,
-                height=height,
-                width=width,
-                guidance=guidance,
-            ),
+            num_inference_steps=steps,
+            height=height,
+            width=width,
+            guidance=guidance,
         )
         meta = {
             "prompt": prompt,
@@ -358,12 +354,10 @@ def simple_generate_image(
                     generated = flux.generate_image(
                         seed=seed,
                         prompt=prompt,
-                        config=Config(
-                            num_inference_steps=4 if "schnell" in model else 20,
-                            height=height,
-                            width=width,
-                            guidance=guidance_value,
-                        ),
+                        num_inference_steps=4 if "schnell" in model else 20,
+                        height=height,
+                        width=width,
+                        guidance=guidance_value,
                     )
                     
                     pil_image = generated.image
@@ -638,17 +632,13 @@ def generate_image_gradio(
                 
                 # Generate the image with progress monitoring
                 print(f"Generating image {i+1}/{len(seeds)} with seed: {current_seed}")
-                generation_config = Config(
+                generated = flux.generate_image(
+                    seed=current_seed,
+                    prompt=prompt,
                     num_inference_steps=steps_int,
                     height=height,
                     width=width,
                     guidance=guidance_value,
-                )
-                
-                generated = flux.generate_image(
-                    seed=current_seed,
-                    prompt=prompt,
-                    config=generation_config,
                 )
                 
                 # Process the result
@@ -839,13 +829,11 @@ def generate_image_controlnet_gradio(
                 seed=current_seed,
                 prompt=prompt,
                 controlnet_image_path=control_image_path,
-                config=Config(
-                    num_inference_steps=steps_int,
-                    height=height,
-                    width=width,
-                    guidance=guidance_value,
-                    controlnet_strength=controlnet_strength_float,
-                ),
+                num_inference_steps=steps_int,
+                height=height,
+                width=width,
+                guidance=guidance_value,
+                controlnet_strength=controlnet_strength_float,
             )
             
             # Process results
@@ -871,9 +859,9 @@ def generate_image_controlnet_gradio(
             if save_canny:
                 # Maak de canny edge detectie afbeelding met ControlnetUtil
                 try:
-                    from mflux.controlnet.controlnet_util import ControlnetUtil
-                except ModuleNotFoundError:
                     from mflux.models.flux.variants.controlnet.controlnet_util import ControlnetUtil
+                except ModuleNotFoundError:
+                    from mflux.controlnet.controlnet_util import ControlnetUtil  # type: ignore
                 from PIL import Image
                 import numpy as np
                 
@@ -1064,14 +1052,12 @@ def generate_image_i2i_gradio(
             generated = flux.generate_image(
                 seed=current_seed,
                 prompt=prompt,
-                config=Config(
-                    num_inference_steps=steps_int,
-                    height=height,
-                    width=width,
-                    guidance=guidance_value,
-                    image_path=Path(input_image_path),
-                    image_strength=image_strength_float,
-                ),
+                num_inference_steps=steps_int,
+                height=height,
+                width=width,
+                guidance=guidance_value,
+                image_path=Path(input_image_path),
+                image_strength=image_strength_float,
             )
             
             # Process results
@@ -1137,14 +1123,15 @@ def generate_image_i2i_gradio(
 def generate_image_in_context_lora_gradio(
     prompt, reference_image, model, base_model, seed, height, width, steps, guidance,
     lora_style, lora_files, metadata,
-    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None,
     vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
 ):
     """
     Generate an image with in-context LoRA.
     """
     try:
-        print(f"\n--- Generating with In-Context LoRA ---")
+        print("")
+        print("--- Generating with In-Context LoRA ---")
         print(f"Model: {model}")
         print(f"Prompt: {prompt}")
         print(f"LoRA style: {lora_style}")
@@ -1157,7 +1144,9 @@ def generate_image_in_context_lora_gradio(
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before in-context LoRA generation")
 
-        # Load prompt from file if specified
+        if reference_image is None:
+            return [], "Reference image is required", prompt
+
         if prompt_file and str(prompt_file).strip():
             try:
                 from backend.dynamic_prompts_manager import load_prompt_from_file
@@ -1171,7 +1160,6 @@ def generate_image_in_context_lora_gradio(
                 print(f"Error loading prompt file '{prompt_file}' in in-context LoRA: {str(e)}")
                 print("Using original prompt instead")
 
-        # Apply dynamic prompt processing for in-context LoRA
         try:
             processed_prompt = process_dynamic_prompt(prompt)
             if processed_prompt != prompt:
@@ -1180,119 +1168,118 @@ def generate_image_in_context_lora_gradio(
         except Exception as e:
             print(f"Warning: Dynamic prompt processing failed in in-context LoRA: {e}")
 
-        # Process parameters
-        from mflux.community.in_context_lora.in_context_loras import LORA_NAME_MAP, LORA_REPO_ID
-        from backend.lora_manager import download_lora
-        
-        # Save reference image
-        ref_image_path = os.path.join(OUTPUT_DIR, f"in_context_ref_{int(time.time())}.png")
-        reference_image.save(ref_image_path)
-        
-        # Process LoRA files and normalize base model override
-        lora_paths = process_lora_files(lora_files)
-        lora_scales_float = process_lora_files(lora_files, lora_scales)
-        base_model_override = normalize_base_model_choice(base_model)
+        if isinstance(reference_image, (str, Path)):
+            ref_image_path = str(reference_image)
+        else:
+            ref_image_path = os.path.join(OUTPUT_DIR, f"in_context_ref_{int(time.time())}.png")
+            reference_image.save(ref_image_path)
 
-        if lora_paths is None:
-            lora_paths = []
-        
-        # Download the style LoRA if specified
+        lora_paths = process_lora_files(lora_files) or []
+        lora_scales_float = process_lora_files(lora_files, lora_scales) if lora_paths else []
+
         if lora_style:
-            lora_filename = LORA_NAME_MAP.get(lora_style)
-            if lora_filename:
-                print(f"Downloading LoRA style: {lora_style} ({lora_filename})")
-                lora_path = download_lora(lora_filename, repo_id=LORA_REPO_ID)
-                if lora_path and os.path.exists(lora_path):
-                    # Add the style LoRA to the list
-                    lora_paths.append(lora_path)
-                    
-                    # Add a default scale for the style LoRA
-                    if lora_scales_float is None:
-                        lora_scales_float = [1.0]
-                    else:
-                        lora_scales_float.append(1.0)
-                        
-                    print(f"Added style LoRA: {lora_path}")
-        
-        # Determine seed via shared workflow (Auto Seeds + fallback)
-        seed_int: Optional[int] = None
-        if seed not in (None, "", "None"):
             try:
-                seed_int = int(seed)
-            except (TypeError, ValueError):
-                print(f"Warning: Invalid seed value '{seed}' in in-context LoRA, falling back to auto-seed")
-                seed_int = None
+                from mflux.models.flux.variants.in_context.utils.in_context_loras import get_lora_path
+                style_entry = get_lora_path(lora_style)
+                style_paths = process_lora_files([style_entry]) or []
+                if style_paths:
+                    lora_paths.extend(style_paths)
+                    lora_scales_float = list(lora_scales_float)
+                    lora_scales_float.extend([1.0] * len(style_paths))
+            except Exception as e:
+                print(f"Warning: Failed to resolve in-context LoRA style '{lora_style}': {e}")
+
+        if not lora_paths:
+            lora_paths = None
+            lora_scales_float = None
+        else:
+            if lora_scales_float is None:
+                lora_scales_float = []
+            if len(lora_scales_float) < len(lora_paths):
+                lora_scales_float.extend([1.0] * (len(lora_paths) - len(lora_scales_float)))
+            elif len(lora_scales_float) > len(lora_paths):
+                lora_scales_float = lora_scales_float[:len(lora_paths)]
+
+        base_model_override = normalize_base_model_choice(base_model)
+        model_config = resolve_mflux_model_config(model, base_model_override)
+        model_path = resolve_local_path(strip_quant_suffix(model))
+
+        quantize = None
+        if "-8-bit" in model:
+            quantize = 8
+        elif "-4-bit" in model:
+            quantize = 4
+        elif "-6-bit" in model:
+            quantize = 6
+        elif "-3-bit" in model:
+            quantize = 3
+        elif low_ram:
+            quantize = 8
 
         try:
-            seed = get_next_seed(seed_int)
+            from mflux.models.flux.variants.in_context.flux_in_context_dev import Flux1InContextDev
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.in_context.flux_in_context_dev import Flux1InContextDev  # type: ignore
+
+        try:
+            flux = Flux1InContextDev(
+                model_config=model_config,
+                quantize=quantize,
+                model_path=str(model_path) if model_path else None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+            )
+        except TypeError:
+            flux = Flux1InContextDev(
+                model_config=model_config,
+                quantize=quantize,
+                local_path=str(model_path) if model_path else None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+            )
+
+        seeds = []
+        try:
+            seed_int = None
+            if seed not in (None, "", "None"):
+                seed_int = int(seed)
+            total_images = int(num_images) if num_images else 1
+            for _ in range(total_images):
+                seeds.append(get_next_seed(seed_int))
         except Exception as e:
             print(f"Warning: get_next_seed failed in in-context LoRA, using random seed: {e}")
-            seed = int(time.time())
-        
-        # Initialize Flux
-        flux = get_or_create_flux(
-            model=model,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales_float,
-            low_ram=low_ram,
-            base_model_override=base_model_override
-        )
-        
-        if not flux:
-            return [], "Could not initialize Flux for in-context LoRA", prompt
-            
-        try:
-            print(f"Generating with in-context LoRA, seed: {seed}")
-            current_seed = seed
-            
-            # Guidance waarde: we zorgen ervoor dat het nooit None is
+            total_images = int(num_images) if num_images else 1
+            seeds = [random.randint(0, 2**32 - 1) for _ in range(total_images)]
+
+        results = []
+        filenames = []
+
+        for i, current_seed in enumerate(seeds, start=1):
+            print(f"Generating in-context LoRA image {i}/{len(seeds)} with seed {current_seed}")
             if guidance is None:
                 is_dev_model = "dev" in model
-                guidance_value = 7.0 if is_dev_model else 0.0  # In-context LoRA works better with higher guidance
+                guidance_value = 7.0 if is_dev_model else 0.0
             else:
                 guidance_value = float(guidance)
-                
-            steps_int = 25 if not steps or steps.strip() == "" else int(steps)  # In-context LoRA needs more steps
-            
-            # Generate the image
-            # Aangepaste implementatie voor in-context LoRA generatie
-            
-            # 1. Laad de referentie afbeelding
-            ref_image = Image.open(ref_image_path)
-            
-            # 2. Bereid een prompt voor met "side-by-side" beschrijving (belangrijk voor in-context LoRA)
-            # In-context LoRA werkt door een prompt te gebruiken die beide afbeeldingen beschrijft
+
+            steps_int = 25 if not steps or str(steps).strip() == "" else int(steps)
+
             if "[IMAGE1]" not in prompt and "[LEFT]" not in prompt and "[REFERENCE]" not in prompt:
-                # Als er geen markers zijn, voeg ze toe
                 in_context_prompt = f"This is a set of two side-by-side images. [LEFT] {prompt} [RIGHT] {prompt}"
             else:
-                # Gebruik de bestaande markers in de prompt
                 in_context_prompt = prompt
-            
-            # 3. Stel de breedte in op twee keer de normale breedte om ruimte te maken voor beide afbeeldingen
-            combined_width = width * 2
-            
-            # 4. Genereer de afbeelding met de side-by-side prompt
+
             generated = flux.generate_image(
                 seed=current_seed,
                 prompt=in_context_prompt,
-                config=Config(
-                    num_inference_steps=steps_int,
-                    height=height,
-                    width=combined_width,
-                    guidance=guidance_value,
-                ),
+                num_inference_steps=steps_int,
+                height=height,
+                width=width,
+                guidance=guidance_value,
+                image_path=ref_image_path,
             )
-            
-            # 5. Knip de rechterkant van de gegenereerde afbeelding om alleen het resultaat te tonen
-            # In-context LoRA genereert een side-by-side afbeelding met links de referentie en rechts het resultaat
-            full_image = generated.image
-            right_half = full_image.crop((width, 0, combined_width, height))
-            
-            # Gebruik deze rechterkant als het uiteindelijke resultaat
-            pil_image = right_half
-            
-            # Process results
+
+            output_image = generated.get_right_half().image if hasattr(generated, "get_right_half") else generated.image
             timestamp = int(time.time())
             filename = f"in_context_{timestamp}_{current_seed}.png"
             output_path = os.path.join(OUTPUT_DIR, filename)
@@ -1307,11 +1294,147 @@ def generate_image_in_context_lora_gradio(
                 "lora_style": lora_style,
                 "generation_time": str(time.ctime()),
             }
-            save_image_with_metadata(pil_image, output_path, meta)
-            
-            # Save metadata if requested
+            save_image_with_metadata(output_image, output_path, meta)
+
             if metadata:
                 metadata_path = os.path.join(OUTPUT_DIR, f"in_context_{timestamp}_{current_seed}.json")
+                metadata_dict = {
+                    **meta,
+                    "lora_files": lora_paths,
+                    "lora_scales": lora_scales_float,
+                }
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata_dict, f, indent=2)
+
+            results.append(output_image)
+            filenames.append(filename)
+
+        if results:
+            return results, ", ".join(filenames), prompt
+        return [], "Error: Failed to generate any images", prompt
+
+    except Exception as e:
+        print(f"Error in in-context LoRA preparation: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return [], f"Error: {str(e)}", prompt
+
+    finally:
+        if 'flux' in locals():
+            del flux
+        gc.collect()
+        force_mlx_cleanup()
+
+
+def generate_image_kontext_gradio(
+    prompt, reference_image, model, seed, width, height, steps, guidance,
+    lora_files, metadata, *lora_scales, num_images=1, low_ram=False
+):
+    """
+    Generate an image with FLUX.1 Kontext for image editing via text instructions.
+    """
+    try:
+        print("")
+        print("--- Generating with FLUX.1 Kontext ---")
+        print(f"Model: {model}")
+        print(f"Prompt: {prompt}")
+
+        if not reference_image:
+            return [], "Reference image is required for Kontext generation", prompt
+
+        if isinstance(reference_image, (str, Path)):
+            ref_image_path = str(reference_image)
+            with Image.open(ref_image_path) as ref_img:
+                ref_width, ref_height = ref_img.size
+        else:
+            ref_image_path = os.path.join(OUTPUT_DIR, f"kontext_ref_{int(time.time())}.png")
+            reference_image.save(ref_image_path)
+            ref_width, ref_height = reference_image.size
+
+        if not width or width == 0:
+            width = ref_width
+        if not height or height == 0:
+            height = ref_height
+
+        lora_paths = process_lora_files(lora_files)
+        lora_scales_float = process_lora_files(lora_files, lora_scales) if lora_paths else None
+
+        model_path = resolve_local_path(strip_quant_suffix(model))
+        quantize = None
+        if "-8-bit" in model:
+            quantize = 8
+        elif "-4-bit" in model:
+            quantize = 4
+        elif "-6-bit" in model:
+            quantize = 6
+        elif "-3-bit" in model:
+            quantize = 3
+        elif low_ram:
+            quantize = 8
+
+        try:
+            from mflux.models.flux.variants.kontext.flux_kontext import Flux1Kontext
+        except ModuleNotFoundError:
+            from mflux.models.flux.variants.kontext.flux_kontext import Flux1Kontext  # type: ignore
+
+        model_config = ModelConfig.dev_kontext()
+        try:
+            flux = Flux1Kontext(
+                model_config=model_config,
+                quantize=quantize,
+                model_path=str(model_path) if model_path else None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+            )
+        except TypeError:
+            flux = Flux1Kontext(
+                model_config=model_config,
+                quantize=quantize,
+                local_path=str(model_path) if model_path else None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+            )
+
+        seeds = []
+        try:
+            seed_int = None
+            if seed not in (None, "", "None"):
+                seed_int = int(seed)
+            total_images = int(num_images) if num_images else 1
+            for _ in range(total_images):
+                seeds.append(get_next_seed(seed_int))
+        except Exception as e:
+            print(f"Warning: get_next_seed failed in Kontext, using random seed: {e}")
+            total_images = int(num_images) if num_images else 1
+            seeds = [random.randint(0, 2**32 - 1) for _ in range(total_images)]
+        results = []
+        filenames = []
+
+        for current_seed in seeds:
+            if guidance is None:
+                guidance_value = 3.0
+            else:
+                guidance_value = float(guidance)
+            steps_int = 25 if not steps or str(steps).strip() == "" else int(steps)
+
+            generated = flux.generate_image(
+                seed=current_seed,
+                prompt=prompt,
+                num_inference_steps=steps_int,
+                height=height,
+                width=width,
+                guidance=guidance_value,
+                image_path=ref_image_path,
+            )
+
+            pil_image = generated.image
+            timestamp = int(time.time())
+            filename = f"kontext_{timestamp}_{current_seed}.png"
+            output_path = os.path.join(OUTPUT_DIR, filename)
+            pil_image.save(output_path)
+
+            if metadata:
+                metadata_path = os.path.join(OUTPUT_DIR, f"kontext_{timestamp}_{current_seed}.json")
                 metadata_dict = {
                     "prompt": prompt,
                     "seed": current_seed,
@@ -1319,238 +1442,27 @@ def generate_image_in_context_lora_gradio(
                     "guidance": guidance_value,
                     "width": width,
                     "height": height,
-                    "model": model,
-                    "lora_style": lora_style,
+                    "model": "dev-kontext",
                     "generation_time": str(time.ctime()),
-                    "lora_files": lora_paths,
-                    "lora_scales": lora_scales_float
+                    "reference_image_used": True,
                 }
                 with open(metadata_path, "w") as f:
                     json.dump(metadata_dict, f, indent=2)
-                    
-            print(f"Generated in-context LoRA image saved to {output_path}")
-            return [pil_image], filename, prompt
-            
-        except Exception as e:
-            print(f"Error in in-context LoRA generation: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return [], f"Error: {str(e)}", prompt
-            
-    except Exception as e:
-        print(f"Error in in-context LoRA preparation: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return [], f"Error: {str(e)}", prompt
-        
-    finally:
-        # Cleanup
-        if 'flux' in locals():
-            del flux
-        gc.collect()
-        force_mlx_cleanup()
 
+            results.append(pil_image)
+            filenames.append(filename)
 
+        if results:
+            return results, ", ".join(filenames), prompt
+        return [], "Error: No images were generated", prompt
 
-def generate_image_kontext_gradio(
-    prompt, reference_image, seed, height, width, steps, guidance,
-    metadata, prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
-    vae_tiling=False, vae_tiling_split="horizontal", num_images=1, low_ram=False
-):
-    """
-    Generate an image with FLUX.1 Kontext for image editing via text instructions.
-    Kontext automatically uses the dev-kontext model and requires a reference image.
-    """
-    try:
-        print(f"\n--- Generating with FLUX.1 Kontext ---")
-        print(f"Reference image provided: {reference_image is not None}")
-        print(f"Prompt: {prompt}")
-        print(f"Guidance: {guidance} (recommended 2.0-4.0 for Kontext)")
-        
-        if not reference_image:
-            error_msg = "Reference image is required for Kontext generation"
-            print(f"Error: {error_msg}")
-            return [], error_msg, prompt
-        
-        # Handle dynamic prompts from file if specified
-        if prompt_file and os.path.exists(prompt_file):
-            from backend.managers.dynamic_prompts_manager import load_prompt_from_file
-            try:
-                loaded_prompt = load_prompt_from_file(prompt_file)
-                if loaded_prompt:
-                    prompt = loaded_prompt
-                    print(f"Loaded prompt from file: {prompt}")
-            except Exception as e:
-                print(f"Warning: Could not load prompt from file {prompt_file}: {e}")
-        
-        # Handle config from metadata if specified
-        if config_from_metadata and os.path.exists(config_from_metadata):
-            from backend.managers.metadata_config_manager import extract_config_from_metadata
-            try:
-                config_dict = extract_config_from_metadata(config_from_metadata)
-                if config_dict:
-                    # Apply extracted config (override current settings)
-                    height = config_dict.get('height', height)
-                    width = config_dict.get('width', width)
-                    steps = config_dict.get('steps', steps)
-                    guidance = config_dict.get('guidance', guidance)
-                    print(f"Applied config from metadata: {config_dict}")
-            except Exception as e:
-                print(f"Warning: Could not extract config from metadata {config_from_metadata}: {e}")
-        
-        # Validate and convert parameters
-        try:
-            height = int(height)
-            width = int(width)
-            steps_int = int(steps)
-            guidance_value = float(guidance)
-        except ValueError as e:
-            error_msg = f"Invalid parameter values: {str(e)}"
-            print(f"Error: {error_msg}")
-            return [], error_msg, prompt
-        
-        # Kontext-specific validation
-        if guidance_value < 1.0 or guidance_value > 6.0:
-            print(f"Warning: Guidance {guidance_value} is outside recommended range 2.0-4.0 for Kontext")
-        
-        # Process reference image
-        try:
-            if isinstance(reference_image, str) and os.path.exists(reference_image):
-                reference_pil = Image.open(reference_image).convert('RGB')
-            elif hasattr(reference_image, 'save'):  # PIL Image
-                reference_pil = reference_image.convert('RGB')
-            else:
-                error_msg = "Invalid reference image format"
-                print(f"Error: {error_msg}")
-                return [], error_msg, prompt
-        except Exception as e:
-            error_msg = f"Error processing reference image: {str(e)}"
-            print(f"Error: {error_msg}")
-            return [], error_msg, prompt
-        
-        # Auto-generate seed if not provided
-        if not seed:
-            seed = get_random_seed()
-        else:
-            try:
-                seed = int(seed)
-            except ValueError:
-                seed = get_random_seed()
-                print(f"Invalid seed, using random seed: {seed}")
-        
-        # Initialize Flux with dev-kontext model (Kontext automatically uses this model)
-        flux = get_or_create_flux(
-            model="dev-kontext",  # Kontext always uses dev-kontext model
-            lora_paths=None,      # Kontext doesn't use LoRA files
-            lora_scales=None,
-            low_ram=low_ram
-        )
-        
-        generated_images = []
-        filenames = []
-        
-        for i in range(num_images):
-            current_seed = seed + i if num_images > 1 else seed
-            print(f"Generating Kontext image {i+1}/{num_images} with seed {current_seed}")
-            
-            try:
-                # Generate image with Kontext
-                generated = flux.generate_image(
-                    seed=current_seed,
-                    prompt=prompt,
-                    config=Config(
-                        num_inference_steps=steps_int,
-                        height=height,
-                        width=width,
-                        guidance=guidance_value,
-                        init_image_strength=0.95  # Standard for Kontext editing
-                    ),
-                    init_image=reference_pil
-                )
-                
-                # Convert to PIL
-                if isinstance(generated, list) and len(generated) > 0:
-                    pil_image = generated[0]
-                else:
-                    pil_image = generated
-                
-                if not isinstance(pil_image, Image.Image):
-                    pil_image = Image.fromarray((pil_image * 255).astype(np.uint8))
-                
-                generated_images.append(pil_image)
-                
-                # Save image
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"kontext_{timestamp}_{current_seed}.png"
-                output_path = os.path.join(OUTPUT_DIR, filename)
-                pil_image.save(output_path)
-                filenames.append(filename)
-                
-                # Handle stepwise output if specified
-                if stepwise_output_dir:
-                    from backend.managers.stepwise_output_manager import save_stepwise_output
-                    try:
-                        save_stepwise_output(
-                            stepwise_output_dir, 
-                            pil_image, 
-                            current_seed, 
-                            steps_int,
-                            "kontext"
-                        )
-                    except Exception as e:
-                        print(f"Warning: Could not save stepwise output: {e}")
-                
-                # Save metadata if requested
-                if metadata:
-                    metadata_path = os.path.join(OUTPUT_DIR, f"kontext_{timestamp}_{current_seed}.json")
-                    metadata_dict = {
-                        "prompt": prompt,
-                        "seed": current_seed,
-                        "steps": steps_int,
-                        "guidance": guidance_value,
-                        "width": width,
-                        "height": height,
-                        "model": "dev-kontext",
-                        "generation_time": str(time.ctime()),
-                        "reference_image_used": True,
-                        "kontext_editing": True
-                    }
-                    
-                    # Add MFLUX v0.9.0 metadata
-                    if prompt_file:
-                        metadata_dict["prompt_file"] = prompt_file
-                    if config_from_metadata:
-                        metadata_dict["config_from_metadata"] = config_from_metadata
-                    if stepwise_output_dir:
-                        metadata_dict["stepwise_output_dir"] = stepwise_output_dir
-                    if vae_tiling:
-                        metadata_dict["vae_tiling"] = vae_tiling
-                        metadata_dict["vae_tiling_split"] = vae_tiling_split
-                    
-                    with open(metadata_path, "w") as f:
-                        json.dump(metadata_dict, f, indent=2)
-                
-                print(f"Generated Kontext image saved to {output_path}")
-                
-            except Exception as e:
-                print(f"Error generating Kontext image {i+1}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                continue
-        
-        if generated_images:
-            return generated_images, ", ".join(filenames), prompt
-        else:
-            return [], "Error: No images were generated", prompt
-            
     except Exception as e:
         print(f"Error in Kontext generation: {str(e)}")
         import traceback
         traceback.print_exc()
         return [], f"Error: {str(e)}", prompt
-        
+
     finally:
-        # Cleanup
         if 'flux' in locals():
             del flux
         gc.collect()

@@ -1,8 +1,10 @@
 import os
-import gradio as gr
-from huggingface_hub import HfApi, HfFolder, snapshot_download, hf_hub_download
-from pathlib import Path
 import json
+from pathlib import Path
+
+import gradio as gr
+from huggingface_hub import HfApi, snapshot_download, hf_hub_download
+
 from backend.model_manager import CustomModelConfig, get_custom_model_config
 
 MODELS_DIR = "models"
@@ -21,16 +23,16 @@ def login_huggingface(api_key):
     try:
         if not api_key:
             return "Error: API key is missing"
-        
-        HfFolder.save_token(api_key)
-        api = HfApi()
-        
+
+        os.environ["HUGGINGFACE_HUB_TOKEN"] = api_key
+        api = HfApi(token=api_key)
+
         try:
             api.whoami()
             return "Successfully logged in to Hugging Face"
         except Exception as e:
             return f"Error validating credentials: {str(e)}"
-        
+
     except Exception as e:
         return f"Error logging in to Hugging Face: {str(e)}"
 
@@ -41,10 +43,10 @@ def download_lora_model_huggingface(model_name, hf_api_key):
     try:
         if not hf_api_key:
             return "Error: API key is missing"
-        
-        HfFolder.save_token(hf_api_key)
-        api = HfApi()
-        
+
+        os.environ["HUGGINGFACE_HUB_TOKEN"] = hf_api_key
+        api = HfApi(token=hf_api_key)
+
         try:
             api.whoami()
         except Exception as e:

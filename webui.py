@@ -3,6 +3,7 @@ import threading
 import os
 import subprocess
 import importlib
+import platform
 from pathlib import Path
 
 # Ensure local mflux sources are available before importing any UI modules.
@@ -12,6 +13,10 @@ if local_mflux.exists():
     local_path = str(local_mflux)
     if local_path not in sys.path:
         sys.path.insert(0, local_path)
+
+if sys.platform != "darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
+    print("[Setup] MFLUX WebUI requires macOS on Apple Silicon (MLX). Windows/Linux are not supported.")
+    sys.exit(1)
 
 
 def _ensure_gradio():
@@ -84,8 +89,15 @@ if __name__ == "__main__":
     threading.Thread(target=_start_api, name="api-server", daemon=True).start()
     print(f"[API] Starting API server on http://{api_host}:{api_port} (endpoint: /sdapi/v1/txt2img)")
 
-    demo = create_ui()
-    demo.queue().launch(
+    demo, theme, custom_css = create_ui()
+    try:
+        queue_concurrency = int(os.environ.get("MFLUX_QUEUE_CONCURRENCY", "4"))
+    except ValueError:
+        queue_concurrency = 4
+    queue_status = os.environ.get("MFLUX_QUEUE_STATUS", "true").lower() in {"1", "true", "yes", "on"}
+    demo.queue(default_concurrency_limit=queue_concurrency).launch(
         server_port=None,
-        show_error=True
+        show_error=True,
+        theme=theme,
+        css=custom_css,
     )

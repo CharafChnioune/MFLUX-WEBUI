@@ -1,11 +1,13 @@
 import os
+import re
 from pathlib import Path
 from shutil import disk_usage
 from typing import Dict, List, Optional
 
 import gradio as gr
-from huggingface_hub import HfApi, HfFolder, snapshot_download
+from huggingface_hub import HfApi, snapshot_download
 
+from backend.mflux_compat import ModelConfig as MfluxModelConfig
 # Layout/state docs referenced across the UI:
 # - gradiodocs/docs-blocks/blocks.md (consistent Blocks state)
 # - gradiodocs/guides-controlling-layout/controlling_layout.md (Row/Column ordering)
@@ -56,6 +58,7 @@ def _register_default_models():
         ("dev", "AITRADER/MFLUXUI.1-dev", 512, "dev"),
         ("krea-dev", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
         ("dev-krea", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
+        ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
     for alias, repo, seq_len, base_arch in official:
         MODELS[alias] = CustomModelConfig(repo, alias, 1000, seq_len, base_arch)
@@ -104,6 +107,7 @@ def get_updated_models() -> List[str]:
         "krea-dev-6-bit",
         "krea-dev-8-bit",
         "dev-krea",
+        "seedvr2",
     ]
     predefined = [alias for alias in ordered if alias in MODELS]
 
@@ -174,6 +178,50 @@ def resolve_local_path(alias: str) -> Optional[Path]:
             config.local_dir = candidate
         return candidate
     return None
+
+
+def strip_quant_suffix(model_name: str) -> str:
+    return re.sub(r"-(?:3|4|6|8)-bit$", "", model_name, flags=re.IGNORECASE)
+
+
+def resolve_mflux_model_config(model_name: str, base_model: Optional[str] = None) -> MfluxModelConfig:
+    resolved_name = strip_quant_suffix(model_name or "").strip()
+    if not resolved_name:
+        resolved_name = "schnell"
+
+    base_model = normalize_base_model_choice(base_model)
+    if base_model is None:
+        custom = MODELS.get(resolved_name)
+        if custom:
+            base_model = custom.base_arch
+
+    if resolved_name == "dev-krea":
+        resolved_name = "krea-dev"
+
+    try:
+        return MfluxModelConfig.from_name(model_name=resolved_name, base_model=base_model)
+    except Exception:
+        method_map = {
+            "dev": "dev",
+            "schnell": "schnell",
+            "krea-dev": "krea_dev",
+            "dev-kontext": "dev_kontext",
+            "dev-fill": "dev_fill",
+            "dev-redux": "dev_redux",
+            "dev-depth": "dev_depth",
+            "dev-controlnet-canny": "dev_controlnet_canny",
+            "schnell-controlnet-canny": "schnell_controlnet_canny",
+            "dev-controlnet-upscaler": "dev_controlnet_upscaler",
+            "dev-fill-catvton": "dev_fill_catvton",
+            "qwen-image": "qwen_image",
+            "qwen-image-edit": "qwen_image_edit",
+            "fibo": "fibo",
+            "z-image-turbo": "z_image_turbo",
+        }
+        method = method_map.get(resolved_name)
+        if method and hasattr(MfluxModelConfig, method):
+            return getattr(MfluxModelConfig, method)()
+        return MfluxModelConfig.from_name(model_name=resolved_name, base_model=base_model)
 
 
 def download_and_save_model(
@@ -253,8 +301,8 @@ def login_huggingface(api_key):
         if not api_key:
             return "Error: API key is missing"
 
-        HfFolder.save_token(api_key)
-        api = HfApi()
+        os.environ["HUGGINGFACE_HUB_TOKEN"] = api_key
+        api = HfApi(token=api_key)
 
         try:
             api.whoami()

@@ -5,7 +5,7 @@ import requests
 from pathlib import Path
 from tqdm import tqdm
 import gradio as gr
-from huggingface_hub import hf_hub_download, HfApi, HfFolder
+from huggingface_hub import hf_hub_download, HfApi
 
 LORA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lora")
 os.makedirs(LORA_DIR, exist_ok=True)
@@ -54,7 +54,7 @@ def get_lora_choices():
 def process_lora_files(selected_loras, lora_scales=None):
     """
     Process selected LoRA files and return valid paths.
-    If a HuggingFace repository ID is provided (e.g. "username/repo_name|lora_name"), 
+    If a HuggingFace repository ID is provided (e.g. "username/repo_name|lora_name" or "username/repo_name:lora_name"), 
     it will automatically download the LoRA.
     
     Args:
@@ -77,7 +77,7 @@ def process_lora_files(selected_loras, lora_scales=None):
     
     for lora in selected_loras:
         if lora:
-            if "|" in lora:
+            if "|" in lora or (":" in lora and "/" in lora):
                 # It's a Hugging Face repository ID
                 try:
                     lora_path = download_lora_model_huggingface(lora)
@@ -166,13 +166,15 @@ def download_lora_model_huggingface(model_name, hf_api_key=None):
     try:
         # Set up API key if provided
         if hf_api_key:
-            HfFolder.save_token(hf_api_key)
+            os.environ["HUGGINGFACE_HUB_TOKEN"] = hf_api_key
             
         # Check if model_name contains a specific LoRA name
         repo_id = model_name
         lora_name = None
         if "|" in model_name:
             repo_id, lora_name = model_name.split("|", 1)
+        elif ":" in model_name and "/" in model_name:
+            repo_id, lora_name = model_name.split(":", 1)
             
         # Get model name for file naming
         model_name_only = repo_id.split("/")[-1] if "/" in repo_id else repo_id
@@ -185,14 +187,17 @@ def download_lora_model_huggingface(model_name, hf_api_key=None):
         # Try to locate or download the .safetensors file
         try:
             # Check if we need to find a specific LoRA file or just download the main one
+            hf_api = HfApi(token=hf_api_key)
+            files = hf_api.list_repo_files(repo_id)
+
             if lora_name:
                 # List files in the repo to find the specific LoRA
-                hf_api = HfApi()
-                files = hf_api.list_repo_files(repo_id)
-                
-                # Find files that match the LoRA name
-                matching_files = [f for f in files if f.endswith('.safetensors') and (lora_name in f)]
-                
+                if lora_name in files:
+                    matching_files = [lora_name]
+                else:
+                    # Find files that match the LoRA name
+                    matching_files = [f for f in files if f.endswith('.safetensors') and (lora_name in f)]
+
                 if not matching_files:
                     # Try without filtering by lora_name (might be the repo name itself)
                     matching_files = [f for f in files if f.endswith('.safetensors')]
@@ -204,8 +209,6 @@ def download_lora_model_huggingface(model_name, hf_api_key=None):
                 file_to_download = matching_files[0]
             else:
                 # Just find any .safetensors file in the repo
-                hf_api = HfApi()
-                files = hf_api.list_repo_files(repo_id)
                 safetensors_files = [f for f in files if f.endswith('.safetensors')]
                 
                 if not safetensors_files:
@@ -218,7 +221,8 @@ def download_lora_model_huggingface(model_name, hf_api_key=None):
                 repo_id=repo_id,
                 filename=file_to_download,
                 local_dir=LORA_DIR,
-                token=hf_api_key
+                token=hf_api_key,
+                local_dir_use_symlinks=False
             )
             
             # Rename the file to include the model name if necessary
@@ -250,7 +254,8 @@ def download_lora_model(hf_model_name, api_key=None):
     """
     try:
         if api_key:
-            HfFolder.save_token(api_key)
+            # HfFolder removed; use env token
+            os.environ["HUGGINGFACE_HUB_TOKEN"] = api_key
 
         model_name = hf_model_name.split("/")[-1]
         local_path = os.path.join(LORA_DIR, f"{model_name}.safetensors")

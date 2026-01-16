@@ -1,5 +1,6 @@
 import gradio as gr
 from backend.upscale_manager import upscale_manager, upscale_image_gradio, batch_upscale_gradio, upscale_with_custom_dimensions_gradio
+from backend.seedvr2_manager import generate_seedvr2_upscale
 from backend.prompts_manager import enhance_prompt
 from frontend.components.llmsettings import create_llm_settings
 
@@ -38,24 +39,24 @@ def create_upscale_tab():
                 
                 model_name = gr.Dropdown(
                     label="Model",
-                    choices=["schnell", "dev"],
+                    choices=["seedvr2", "schnell", "dev"],
                     value="dev",
-                    info="Dev model recommended for best quality"
+                    info="SeedVR2 for fidelity 1-step upscaling; Dev for ControlNet upscaler"
                 )
                 
                 # Upscale settings
                 with gr.Row():
                     scale_factor = gr.Textbox(
-                        label="Scale Factor",
+                        label="Scale Factor / Resolution",
                         value="2x",
-                        placeholder="2x, 1.5x, 2048, auto",
-                        info="Scale factors (2x, 1.5x) or absolute pixels (1024) or 'auto' to preserve dimensions"
+                        placeholder="2x, 1024",
+                        info="For SeedVR2: shortest edge or Nx; for ControlNet: scale factor"
                     )
                     
                     custom_resolution = gr.Checkbox(
                         label="Mixed Dimensions",
                         value=False,
-                        info="Combine scale factors and absolute values"
+                        info="ControlNet/PIL only: combine scale factors and absolute values"
                     )
                 
                 with gr.Row(visible=False) as custom_res_row:
@@ -73,7 +74,7 @@ def create_upscale_tab():
                     )
                 
                 # Advanced options
-                with gr.Accordion("Advanced Options", open=False):
+                with gr.Accordion("Advanced Options", open=False) as adv_opts:
                     with gr.Row():
                         seed = gr.Number(
                             label="Seed",
@@ -106,7 +107,7 @@ def create_upscale_tab():
                         maximum=1.0,
                         step=0.05,
                         value=0.6,
-                        info="Recommended: 0.5-0.7 for best results"
+                        info="Recommended: 0.5-0.7 for best results (ControlNet only)"
                     )
                     
                     vae_tiling = gr.Checkbox(
@@ -139,6 +140,16 @@ def create_upscale_tab():
                         choices=[("None", 0), ("8-bit", 8), ("6-bit", 6), ("4-bit", 4), ("3-bit", 3)],
                         value=8,
                         info="8-bit recommended for memory efficiency"
+                    )
+
+                with gr.Accordion("SeedVR2 Options", open=False) as seedvr2_opts:
+                    seedvr2_softness = gr.Slider(
+                        label="Softness",
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.05,
+                        value=0.0,
+                        info="Pre-downsample factor (0 = off, 1 = max smoothing)"
                     )
                 
                 with gr.Row():
@@ -300,7 +311,7 @@ def create_upscale_tab():
         
         random_seed_btn.click(fn=random_seed, outputs=[seed])
         
-        # Update resolution info when inputs change
+        # Update resolution info when inputs change (non-SeedVR2 paths)
         for inp in [input_image, scale_factor, custom_resolution, target_width, target_height]:
             inp.change(
                 fn=calculate_dimensions,
@@ -312,44 +323,73 @@ def create_upscale_tab():
         def upscale_single_image(input_image, prompt, model_name, scale_factor, use_custom,
                                target_width, target_height, seed, guidance, steps,
                                controlnet_strength, vae_tiling, vae_tiling_split,
-                               save_metadata, low_ram_mode, quantize):
+                               save_metadata, low_ram_mode, quantize, seedvr2_softness):
             if input_image is None:
                 return None, "Please upload an image to upscale", ""
             
-            if not prompt:
+            if model_name != "seedvr2" and not prompt:
                 return None, "Please describe the image for better upscaling", ""
             
             try:
-                # Calculate target dimensions
-                if use_custom:
-                    width, height = int(target_width), int(target_height)
+                if model_name == "seedvr2":
+                    # SeedVR2 path uses shortest-edge resolution or scale factor
+                    tmp_path = input_image if isinstance(input_image, str) else None
+                    created_tmp = False
+                    if not tmp_path:
+                        # Save PIL to temp file for backend (keeps Gradio wiring simple)
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                            input_image.save(tmp.name)
+                            tmp_path = tmp.name
+                            created_tmp = True
+                    status_msg = f"SeedVR2 upscaling to {scale_factor} (softness {seedvr2_softness})..."
+                    yield None, status_msg, resolution_info.value
+                    upscaled_image, status_text, _ = generate_seedvr2_upscale(
+                        image_path=tmp_path,
+                        resolution=scale_factor,
+                        softness=seedvr2_softness,
+                        seed=seed,
+                        metadata=save_metadata,
+                        progress=gr.Progress(track_tqdm=False)
+                    )
+                    yield upscaled_image, status_text, resolution_info.value
+                    if created_tmp:
+                        import os
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
                 else:
-                    orig_w, orig_h = input_image.size
-                    sf = parse_scale_value(scale_factor)
-                    width = int(orig_w * sf)
-                    height = int(orig_h * sf)
-                
-                status_msg = f"Upscaling to {width}x{height}..."
-                yield None, status_msg, resolution_info.value
-                
-                upscaled_image, metadata = upscale_manager.upscale_single_gradio(
-                    input_image=input_image,
-                    prompt=prompt,
-                    model_name=model_name,
-                    target_width=width,
-                    target_height=height,
-                    seed=seed,
-                    guidance=guidance,
-                    steps=steps,
-                    controlnet_strength=controlnet_strength,
-                    vae_tiling=vae_tiling,
-                    vae_tiling_split=vae_tiling_split,
-                    save_metadata=save_metadata,
-                    low_ram_mode=low_ram_mode,
-                    quantize=quantize
-                )
-                
-                yield upscaled_image, "Upscaling complete!", resolution_info.value
+                    # Calculate target dimensions
+                    if use_custom:
+                        width, height = int(target_width), int(target_height)
+                    else:
+                        orig_w, orig_h = input_image.size
+                        sf = parse_scale_value(scale_factor)
+                        width = int(orig_w * sf)
+                        height = int(orig_h * sf)
+                    
+                    status_msg = f"Upscaling to {width}x{height}..."
+                    yield None, status_msg, resolution_info.value
+                    
+                    upscaled_image, metadata = upscale_manager.upscale_single_gradio(
+                        input_image=input_image,
+                        prompt=prompt,
+                        model_name=model_name,
+                        target_width=width,
+                        target_height=height,
+                        seed=seed,
+                        guidance=guidance,
+                        steps=steps,
+                        controlnet_strength=controlnet_strength,
+                        vae_tiling=vae_tiling,
+                        vae_tiling_split=vae_tiling_split,
+                        save_metadata=save_metadata,
+                        low_ram_mode=low_ram_mode,
+                        quantize=quantize
+                    )
+                    
+                    yield upscaled_image, "Upscaling complete!", resolution_info.value
                 
             except Exception as e:
                 yield None, f"Error: {str(e)}", resolution_info.value
@@ -361,6 +401,9 @@ def create_upscale_tab():
                                low_ram_mode, quantize):
             if not batch_images:
                 return "Please upload images for batch upscaling"
+            
+            if model_name == "seedvr2":
+                return "Batch upscaling is not available for SeedVR2 yet"
             
             try:
                 total = len(batch_images)
@@ -437,7 +480,7 @@ def create_upscale_tab():
                 input_image, prompt, model_name, scale_factor, custom_resolution,
                 target_width, target_height, seed, guidance, steps,
                 controlnet_strength, vae_tiling, vae_tiling_split,
-                save_metadata, low_ram_mode, quantize
+                save_metadata, low_ram_mode, quantize, seedvr2_softness
             ],
             outputs=[output_image, status, resolution_info]
         )
