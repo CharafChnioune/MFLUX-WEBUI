@@ -6,8 +6,7 @@ from typing import List, Optional, Sequence, Tuple
 import gradio as gr
 from PIL import Image
 
-from mflux.config.config import Config
-from mflux.config.model_config import ModelConfig
+from backend.mflux_compat import Config, ModelConfig
 from mflux.models.qwen.variants.edit.qwen_image_edit import QwenImageEdit
 from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 

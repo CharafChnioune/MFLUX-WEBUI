@@ -11,7 +11,7 @@ from backend.flux_manager import (
     print_memory_usage
 )
 from backend.lora_manager import process_lora_files
-from mflux.config.config import Config
+from backend.mflux_compat import Config
 
 def update_guidance_visibility(model):
     """

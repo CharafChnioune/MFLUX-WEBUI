@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import gradio as gr
-from mflux.config.model_config import ModelConfig
+from backend.mflux_compat import ModelConfig
 from mflux.models.flux.variants.txt2img.flux import Flux1
 from mflux.models.qwen.variants.txt2img.qwen_image import QwenImage
 

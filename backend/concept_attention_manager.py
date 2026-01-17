@@ -5,8 +5,7 @@ from typing import List, Optional, Tuple
 import gradio as gr
 from PIL import Image
 
-from mflux.config.config import Config
-from mflux.config.model_config import ModelConfig
+from backend.mflux_compat import Config, ModelConfig
 from mflux.models.flux.variants.concept_attention.flux_concept import Flux1Concept
 from mflux.models.flux.variants.concept_attention.flux_concept_from_image import Flux1ConceptFromImage
 

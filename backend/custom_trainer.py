@@ -18,8 +18,8 @@ if not TYPE_CHECKING:
         random = None
 
     # Importeer mflux klassen
-    from mflux import Config, Flux1, ModelConfig
-    from mflux.config.runtime_config import RuntimeConfig
+    from mflux import Flux1
+    from mflux_compat import Config, ModelConfig, RuntimeConfig
     from mflux.dreambooth.dataset.dataset import Dataset
     from mflux.dreambooth.dataset.iterator import Iterator
     from mflux.dreambooth.lora_layers.lora_layers import LoRALayers

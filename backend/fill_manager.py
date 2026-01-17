@@ -8,7 +8,7 @@ from PIL import Image
 import numpy as np
 from pathlib import Path
 import json
-from mflux.config.config import Config
+from backend.mflux_compat import Config
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
 from backend.model_manager import normalize_base_model_choice
 

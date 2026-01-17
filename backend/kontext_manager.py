@@ -4,7 +4,7 @@ import time
 import json
 from pathlib import Path
 from PIL import Image
-from mflux.config.config import Config
+from backend.mflux_compat import Config
 from backend.flux_manager import get_or_create_flux, get_random_seed, calculate_dimensions_with_scale, OUTPUT_DIR
 from backend.lora_manager import process_lora_files
 from backend.mlx_utils import force_mlx_cleanup

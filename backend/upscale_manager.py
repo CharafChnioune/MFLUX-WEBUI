@@ -9,7 +9,7 @@ import numpy as np
 from pathlib import Path
 import json
 import tempfile
-from mflux.config.config import Config
+from backend.mflux_compat import Config, ModelConfig
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
 from backend.flux_manager import parse_scale_factor
 
@@ -41,10 +41,8 @@ def _get_upscale_model():
         # Import lazily so environments without controlnet support still run with PIL fallback.
         try:
             from mflux.controlnet.flux_controlnet import Flux1Controlnet
-            from mflux.config.model_config import ModelConfig
         except ModuleNotFoundError:
             from mflux.models.flux.variants.controlnet.flux_controlnet import Flux1Controlnet  # type: ignore
-            from mflux.config.model_config import ModelConfig  # type: ignore
 
         _UPSCALE_MODEL = Flux1Controlnet(
             model_config=ModelConfig.dev_controlnet_upscaler(),
