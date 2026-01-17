@@ -26,9 +26,12 @@ def generate_depth_map(image_path):
     """
     try:
         try:
-            from mflux.depth.depth_pro import DepthPro
+            from mflux.models.depth_pro.model.depth_pro import DepthPro
         except ModuleNotFoundError:
-            from mflux.models.depth_pro.depth_pro import DepthPro
+            try:
+                from mflux.models.depth_pro.depth_pro import DepthPro  # type: ignore
+            except ModuleNotFoundError:
+                from mflux.depth.depth_pro import DepthPro  # type: ignore
         
         # Load the image
         image = Image.open(image_path).convert("RGB")

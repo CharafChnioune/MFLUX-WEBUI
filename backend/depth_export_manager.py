@@ -2,7 +2,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import gradio as gr
-from mflux.models.depth_pro.depth_pro import DepthPro
+try:
+    from mflux.models.depth_pro.model.depth_pro import DepthPro
+except ModuleNotFoundError:  # pragma: no cover - legacy fallback
+    try:
+        from mflux.models.depth_pro.depth_pro import DepthPro  # type: ignore
+    except ModuleNotFoundError:
+        from mflux.depth.depth_pro import DepthPro  # type: ignore
 
 # Component docs referenced:
 # - gradiodocs/docs-image/image.md (file inputs/outputs)
