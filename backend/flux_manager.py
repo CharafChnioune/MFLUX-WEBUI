@@ -12,6 +12,12 @@ try:
 except ModuleNotFoundError:
     from mflux.flux.flux import Flux1  # type: ignore
     from mflux.controlnet.flux_controlnet import Flux1Controlnet  # type: ignore
+try:
+    from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
+    from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
+except ModuleNotFoundError:  # pragma: no cover - optional model support
+    Flux2Klein = None
+    Flux2KleinEdit = None
 from backend.lora_manager import process_lora_files, download_lora
 from backend.ollama_manager import enhance_prompt
 from backend.prompts_manager import enhance_prompt_with_mlx
@@ -40,6 +46,11 @@ from backend.model_manager import (
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def is_flux2_model_name(model_name: str) -> bool:
+    normalized = strip_quant_suffix(model_name or "").lower()
+    return normalized.startswith(("flux2-", "klein-")) or normalized == "flux2-klein"
 
 
 def save_image_with_metadata(pil_image, output_path: str, metadata: dict):
@@ -129,7 +140,7 @@ def calculate_dimensions_with_scale(
 
 def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_scales=None, is_controlnet=False, low_ram=False, base_model_override: Optional[str] = None):
     """
-    Create or retrieve a Flux1 instance.
+    Create or retrieve a Flux model instance.
     """
     try:
         base_model = strip_quant_suffix(model)
@@ -147,6 +158,46 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
             quantize = 3
         else:
             quantize = None
+
+        if is_flux2_model_name(base_model):
+            if is_controlnet:
+                print("Flux2 does not support ControlNet.")
+                return None
+            if Flux2Klein is None or Flux2KleinEdit is None:
+                print("Flux2 classes are unavailable. Ensure mflux>=0.15.0 is installed.")
+                return None
+
+            FluxClass = Flux2KleinEdit if image else Flux2Klein
+
+            if not lora_paths:
+                lora_scales = None
+            elif lora_scales is None:
+                lora_scales = []
+            elif isinstance(lora_scales, tuple):
+                lora_scales = list(lora_scales)
+
+            print(
+                f"Creating {FluxClass.__name__} with model_config={model_config}, "
+                f"quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, "
+                f"lora_scales={lora_scales}"
+            )
+            try:
+                flux = FluxClass(
+                    model_config=model_config,
+                    quantize=quantize,
+                    model_path=str(model_path) if model_path else None,
+                    lora_paths=lora_paths,
+                    lora_scales=lora_scales,
+                )
+            except TypeError:
+                flux = FluxClass(
+                    model_config=model_config,
+                    quantize=quantize,
+                    local_path=str(model_path) if model_path else None,
+                    lora_paths=lora_paths,
+                    lora_scales=lora_scales,
+                )
+            return flux
 
         FluxClass = Flux1Controlnet if is_controlnet else Flux1
         if is_controlnet:
@@ -213,7 +264,7 @@ def get_random_seed():
     """
     return str(random.randint(0, 2**32 - 1))
 
-def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num_images):
+def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num_images, model_name: Optional[str] = None):
     """
     Generate a batch of images using the Flux model.
     """
@@ -221,6 +272,11 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
     filenames = []
     seeds_used = []
     
+    flux2_model = is_flux2_model_name(model_name or "") or flux.__class__.__name__.lower().startswith("flux2")
+    if flux2_model and guidance != 1.0:
+        print("FLUX.2 requires guidance=1.0; overriding guidance.")
+        guidance = 1.0
+
     for i in range(num_images):
         current_seed = seed if seed is not None else int(time.time()) + i
         seeds_used.append(current_seed)
@@ -345,16 +401,22 @@ def simple_generate_image(
                 try:
                     print(f"Generating image {i+1} of {num_images} with seed {seed}...")
                     
-                    # Guidance waarde instellen op basis van model type
-                    # Voor "dev" model gebruiken we 4.0, voor "schnell" 0.0
-                    # We zetten het nooit op None
-                    is_dev_model = "dev" in model
-                    guidance_value = 4.0 if is_dev_model else 0.0
-                    
+                    is_flux2 = is_flux2_model_name(model)
+                    if is_flux2:
+                        guidance_value = 1.0
+                        steps_value = 4
+                    else:
+                        # Guidance waarde instellen op basis van model type
+                        # Voor "dev" model gebruiken we 4.0, voor "schnell" 0.0
+                        # We zetten het nooit op None
+                        is_dev_model = "dev" in model
+                        guidance_value = 4.0 if is_dev_model else 0.0
+                        steps_value = 4 if "schnell" in model else 20
+
                     generated = flux.generate_image(
                         seed=seed,
                         prompt=prompt,
-                        num_inference_steps=4 if "schnell" in model else 20,
+                        num_inference_steps=steps_value,
                         height=height,
                         width=width,
                         guidance=guidance_value,
@@ -367,7 +429,7 @@ def simple_generate_image(
                         "model": model,
                         "width": width,
                         "height": height,
-                        "steps": 4 if "schnell" in model else 20,
+                        "steps": steps_value,
                         "guidance": guidance_value,
                     }
                     save_image_with_metadata(pil_image, output_path, meta)
@@ -627,6 +689,11 @@ def generate_image_gradio(
                     guidance_value = 4.0 if is_dev_model else 0.0
                 else:
                     guidance_value = float(guidance)
+
+                if is_flux2_model_name(model):
+                    if guidance_value != 1.0:
+                        print("FLUX.2 requires guidance=1.0; overriding guidance.")
+                    guidance_value = 1.0
                 
                 steps_int = 4 if not steps or steps.strip() == "" else int(steps)
                 
@@ -750,6 +817,9 @@ def generate_image_controlnet_gradio(
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before controlnet generation")
 
+        if is_flux2_model_name(model):
+            return [], "FLUX.2 does not support ControlNet.", prompt
+
         # Load prompt from file if specified (CLI-style --prompt-file)
         if prompt_file and str(prompt_file).strip():
             try:
@@ -820,6 +890,10 @@ def generate_image_controlnet_gradio(
                 guidance_value = 4.0 if is_dev_model else 0.0
             else:
                 guidance_value = float(guidance)
+
+            is_flux2 = is_flux2_model_name(model)
+            if is_flux2:
+                guidance_value = 1.0
                 
             steps_int = 4 if not steps or steps.strip() == "" else int(steps)
             controlnet_strength_float = float(controlnet_strength)
@@ -1049,16 +1123,28 @@ def generate_image_i2i_gradio(
             # Generate the image
             # Opmerking: In MFLUX v0.6.0 gebruiken we image_path en image_strength
             # in plaats van init_image en init_image_strength
-            generated = flux.generate_image(
-                seed=current_seed,
-                prompt=prompt,
-                num_inference_steps=steps_int,
-                height=height,
-                width=width,
-                guidance=guidance_value,
-                image_path=Path(input_image_path),
-                image_strength=image_strength_float,
-            )
+            if is_flux2:
+                generated = flux.generate_image(
+                    seed=current_seed,
+                    prompt=prompt,
+                    num_inference_steps=steps_int,
+                    height=height,
+                    width=width,
+                    guidance=guidance_value,
+                    image_paths=[Path(input_image_path)],
+                    image_strength=image_strength_float,
+                )
+            else:
+                generated = flux.generate_image(
+                    seed=current_seed,
+                    prompt=prompt,
+                    num_inference_steps=steps_int,
+                    height=height,
+                    width=width,
+                    guidance=guidance_value,
+                    image_path=Path(input_image_path),
+                    image_strength=image_strength_float,
+                )
             
             # Process results
             pil_image = generated.image
@@ -1143,6 +1229,9 @@ def generate_image_in_context_lora_gradio(
         print(f"LoRA scales: {lora_scales}")
         print(f"Low-RAM mode: {low_ram}")
         print_memory_usage("Before in-context LoRA generation")
+
+        if is_flux2_model_name(model):
+            return [], "FLUX.2 does not support In-Context LoRA.", prompt
 
         if reference_image is None:
             return [], "Reference image is required", prompt

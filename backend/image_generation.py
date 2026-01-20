@@ -8,7 +8,8 @@ from backend.flux_manager import (
     generate_image_batch,
     clear_flux_cache,
     force_mlx_cleanup,
-    print_memory_usage
+    print_memory_usage,
+    is_flux2_model_name,
 )
 from backend.lora_manager import process_lora_files
 from backend.mflux_compat import Config
@@ -17,6 +18,13 @@ def update_guidance_visibility(model):
     """
     Voorbeeld: Guidance visible maken indien 'dev' in de modelnaam zit.
     """
+    if is_flux2_model_name(model):
+        return gr.update(
+            visible=True,
+            label="Guidance Scale (fixed at 1.0 for FLUX.2)",
+            value=1.0,
+            interactive=False,
+        )
     return gr.update(visible="dev" in model)
 
 def simple_generate_image(prompt, model, image_format, lora_files, ollama_model, system_prompt, *lora_scales_and_num_images):
@@ -52,7 +60,8 @@ def simple_generate_image(prompt, model, image_format, lora_files, ollama_model,
         height=height,
         width=width,
         guidance=7.5,
-        num_images=int(num_images)
+        num_images=int(num_images),
+        model_name=model,
     )
 
     clear_flux_cache()
@@ -107,7 +116,8 @@ def generate_image_gradio(prompt, model, base_model, seed, width, height, steps,
             height=height,
             width=width,
             guidance=guidance,
-            num_images=int(num_images)
+            num_images=int(num_images),
+            model_name=model,
         )
 
         clear_flux_cache()
@@ -162,7 +172,8 @@ def generate_image_controlnet_gradio(prompt, control_image, model, seed, height,
             height=height,
             width=width,
             guidance=guidance,
-            num_images=int(num_images)
+            num_images=int(num_images),
+            model_name=model,
         )
 
         clear_flux_cache()
@@ -221,7 +232,8 @@ def generate_image_i2i_gradio(prompt, init_image, init_image_strength, model, se
             height=height,
             width=width,
             guidance=guidance,
-            num_images=int(num_images)
+            num_images=int(num_images),
+            model_name=model,
         )
 
         clear_flux_cache()

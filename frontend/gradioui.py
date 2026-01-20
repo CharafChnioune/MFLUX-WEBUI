@@ -33,6 +33,8 @@ from frontend.components.qwen_image import create_qwen_image_tab
 from frontend.components.qwen_edit import create_qwen_edit_tab
 from frontend.components.fibo import create_fibo_tab
 from frontend.components.z_image_turbo import create_z_image_turbo_tab
+from frontend.components.flux2_generate import create_flux2_generate_tab
+from frontend.components.flux2_edit import create_flux2_edit_tab
 
 # Backend imports
 from backend.model_manager import (
@@ -154,6 +156,8 @@ def create_ui():
             # New model tabs
             fibo_components = create_fibo_tab()
             z_image_components = create_z_image_turbo_tab()
+            flux2_generate_components = create_flux2_generate_tab()
+            flux2_edit_components = create_flux2_edit_tab()
 
             with gr.TabItem("🎨 Canvas"):
                 canvas_components = create_canvas_tab()

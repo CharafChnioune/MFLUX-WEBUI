@@ -58,6 +58,8 @@ def _register_default_models():
         ("dev", "AITRADER/MFLUXUI.1-dev", 512, "dev"),
         ("krea-dev", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
         ("dev-krea", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
+        ("flux2-klein-4b", "black-forest-labs/FLUX.2-klein-4B", 512, "flux2"),
+        ("flux2-klein-9b", "black-forest-labs/FLUX.2-klein-9B", 512, "flux2"),
         ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
     for alias, repo, seq_len, base_arch in official:
@@ -88,7 +90,22 @@ def get_base_model_choices() -> List[str]:
     return BASE_MODEL_CHOICES.copy()
 
 
-def get_updated_models() -> List[str]:
+def _flux2_ordered() -> List[str]:
+    return [
+        "flux2-klein-4b",
+        "flux2-klein-4b-3-bit",
+        "flux2-klein-4b-4-bit",
+        "flux2-klein-4b-6-bit",
+        "flux2-klein-4b-8-bit",
+        "flux2-klein-9b",
+        "flux2-klein-9b-3-bit",
+        "flux2-klein-9b-4-bit",
+        "flux2-klein-9b-6-bit",
+        "flux2-klein-9b-8-bit",
+    ]
+
+
+def get_updated_models(include_flux2: bool = False) -> List[str]:
     """Combine official aliases with any folders under models/."""
     ordered = [
         "schnell",
@@ -107,8 +124,10 @@ def get_updated_models() -> List[str]:
         "krea-dev-6-bit",
         "krea-dev-8-bit",
         "dev-krea",
-        "seedvr2",
     ]
+    if include_flux2:
+        ordered.extend(_flux2_ordered())
+    ordered.append("seedvr2")
     predefined = [alias for alias in ordered if alias in MODELS]
 
     custom_entries: List[str] = []
@@ -133,6 +152,11 @@ def get_updated_models() -> List[str]:
 
     custom_entries.sort(key=str.lower)
     return predefined + custom_entries
+
+
+def get_flux2_models() -> List[str]:
+    """Return Flux2 Klein aliases (quantized variants included)."""
+    return [alias for alias in _flux2_ordered() if alias in MODELS]
 
 
 def save_quantized_model_gradio(model_name, quantize_bits):
@@ -198,6 +222,9 @@ def resolve_mflux_model_config(model_name: str, base_model: Optional[str] = None
     if resolved_name == "dev-krea":
         resolved_name = "krea-dev"
 
+    if resolved_name.startswith(("flux2-", "klein-")):
+        base_model = None
+
     try:
         return MfluxModelConfig.from_name(model_name=resolved_name, base_model=base_model)
     except Exception:
@@ -205,6 +232,11 @@ def resolve_mflux_model_config(model_name: str, base_model: Optional[str] = None
             "dev": "dev",
             "schnell": "schnell",
             "krea-dev": "krea_dev",
+            "flux2-klein": "flux2_klein_4b",
+            "flux2-klein-4b": "flux2_klein_4b",
+            "flux2-klein-9b": "flux2_klein_9b",
+            "klein-4b": "flux2_klein_4b",
+            "klein-9b": "flux2_klein_9b",
             "dev-kontext": "dev_kontext",
             "dev-fill": "dev_fill",
             "dev-redux": "dev_redux",
@@ -319,10 +351,19 @@ def update_guidance_visibility(model):
     Ensure guidance controls follow docs guidance for interactive components
     (gradiodocs/guides-key-component-concepts/gradio_components_the_key_concepts.md).
     """
-    is_dev = "dev" in model
+    model_name = (model or "").lower()
+    if model_name.startswith(("flux2-", "klein-")):
+        return gr.update(
+            visible=True,
+            label="Guidance Scale (fixed at 1.0 for FLUX.2)",
+            value=1.0,
+            interactive=False,
+        )
+    is_dev = "dev" in model_name
     return gr.update(
         visible=True,
         label="Guidance Scale (required for dev models)" if is_dev else "Guidance Scale (optional)",
+        interactive=True,
     )
 
 

@@ -1,4 +1,4 @@
-# MFLUX WebUI v0.14.2
+# MFLUX WebUI v0.15.4
 
 ![MFLUX WebUI Logo](logo.png)
 
@@ -7,11 +7,11 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now wit
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-[![MFLUX](https://img.shields.io/badge/MFLUX-v0.14.2-green)](https://github.com/filipstrand/mflux)
+[![MFLUX](https://img.shields.io/badge/MFLUX-v0.15.4-green)](https://github.com/filipstrand/mflux)
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.14.x** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
+MFLUX WebUI is a comprehensive interface for the **MFLUX 0.15.x** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
 
 ## Features
 
@@ -20,6 +20,7 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.14.x** image generati
 - 🎨 **Image-to-Image** transformation
 - 🖌️ **Fill Tool (Inpaint/Outpaint)**
 - 🌊 **Depth Tool** with depth-guided generation
+- ⚡ **Flux2 Klein** text-to-image + multi-image edit
 - **Qwen Image & Qwen Edit** for multilingual generation + edits
 - **FIBO** structured prompt generation
 - **Z-Image Turbo** fast text-to-image
@@ -31,7 +32,8 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.14.x** image generati
 - 🎛️ ControlNet support
 - 🎯 **Dreambooth Fine-Tuning**
 
-### New v0.14.2 Highlights
+### New v0.15.4 Highlights
+- **Flux2 Klein (4B/9B)** support with dedicated generate + edit tabs (guidance fixed at 1.0)
 - **SeedVR2 Upscale** tab integration with softness control for faithful 1-step upscaling
 - **FIBO** tab with JSON prompts + optional VLM expansion
 - **Z-Image Turbo** tab with LoRA + img2img support
