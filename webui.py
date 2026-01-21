@@ -95,9 +95,32 @@ if __name__ == "__main__":
     except ValueError:
         queue_concurrency = 4
     queue_status = os.environ.get("MFLUX_QUEUE_STATUS", "true").lower() in {"1", "true", "yes", "on"}
+
+    def _parse_env_port(name: str):
+        value = os.environ.get(name)
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            print(f"[Setup] Invalid {name} value: {value!r}. Using default.")
+            return None
+
+    server_name = os.environ.get("MFLUX_SERVER_NAME", "127.0.0.1")
+    server_port = _parse_env_port("MFLUX_SERVER_PORT")
+    if server_port is None:
+        server_port = _parse_env_port("PORT")
+
+    open_browser = os.environ.get("MFLUX_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
+    if server_port:
+        print(f"[UI] Using server port {server_port} (override).")
+    print("[UI] Launching WebUI. Open the URL Gradio prints below. Models download on first generation.")
+
     demo.queue(default_concurrency_limit=queue_concurrency).launch(
-        server_port=None,
+        server_name=server_name,
+        server_port=server_port,
         show_error=True,
+        inbrowser=open_browser,
         theme=theme,
         css=custom_css,
     )

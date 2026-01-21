@@ -95,6 +95,18 @@ python webui.py   # starts UI + built-in API server
 
 Access the interface in your web browser at `http://localhost:7860`.
 
+#### WebUI launch options
+
+- `MFLUX_SERVER_NAME` (default `127.0.0.1`), set to `0.0.0.0` to expose on your LAN
+- `MFLUX_SERVER_PORT` or `PORT` to force a specific port (otherwise Gradio picks an open one)
+- `MFLUX_OPEN_BROWSER` set to `false` to disable auto-opening the browser
+
+#### Troubleshooting
+
+If your browser shows a folder listing instead of the UI, the WebUI is not running or you are on the wrong port.
+Run `python webui.py` in a terminal and open the exact URL that Gradio prints.
+Model downloads start on the first Generate click (or via the Model & LoRA Management tab).
+
 ### Queueing
 
 The UI runs with Gradio queueing enabled by default. To control how many jobs run in parallel:
