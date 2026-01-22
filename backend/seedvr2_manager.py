@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gc
 import random
 import time
@@ -83,4 +85,3 @@ def generate_seedvr2_upscale(
 
 
 __all__ = ["generate_seedvr2_upscale"]
-
