@@ -59,7 +59,11 @@ def _register_default_models():
         ("krea-dev", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
         ("dev-krea", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
         ("flux2-klein-4b", "black-forest-labs/FLUX.2-klein-4B", 512, "flux2"),
+        ("flux2-klein-4b-mlx-4bit", "AITRADER/FLUX2-klein-4B-mlx-4bit", 512, "flux2"),
+        ("flux2-klein-4b-mlx-8bit", "AITRADER/FLUX2-klein-4B-mlx-8bit", 512, "flux2"),
         ("flux2-klein-9b", "black-forest-labs/FLUX.2-klein-9B", 512, "flux2"),
+        ("flux2-klein-9b-mlx-4bit", "AITRADER/FLUX2-klein-9B-mlx-4bit", 512, "flux2"),
+        ("flux2-klein-9b-mlx-8bit", "AITRADER/FLUX2-klein-9B-mlx-8bit", 512, "flux2"),
         ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
     for alias, repo, seq_len, base_arch in official:
@@ -68,6 +72,8 @@ def _register_default_models():
     for alias, repo, seq_len, base_arch in official:
         if alias == "dev-krea":
             continue  # share canonical entry with krea-dev
+        if "-mlx-" in alias:
+            continue  # pre-quantized models don't need runtime quantization variants
         for bits in ("3", "4", "6", "8"):
             MODELS[f"{alias}-{bits}-bit"] = CustomModelConfig(
                 repo, f"{alias}-{bits}-bit", 1000, seq_len, base_arch
@@ -93,11 +99,15 @@ def get_base_model_choices() -> List[str]:
 def _flux2_ordered() -> List[str]:
     return [
         "flux2-klein-4b",
+        "flux2-klein-4b-mlx-4bit",  # Pre-quantized (faster load)
+        "flux2-klein-4b-mlx-8bit",  # Pre-quantized (faster load)
         "flux2-klein-4b-3-bit",
         "flux2-klein-4b-4-bit",
         "flux2-klein-4b-6-bit",
         "flux2-klein-4b-8-bit",
         "flux2-klein-9b",
+        "flux2-klein-9b-mlx-4bit",  # Pre-quantized (faster load)
+        "flux2-klein-9b-mlx-8bit",  # Pre-quantized (faster load)
         "flux2-klein-9b-3-bit",
         "flux2-klein-9b-4-bit",
         "flux2-klein-9b-6-bit",
