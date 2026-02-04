@@ -1,10 +1,20 @@
 """
-Lightweight API server for MFLUX-WEBUI (SD WebUI-style).
+Lightweight API server for MFLUX-WEBUI (SD WebUI-style + async job API).
 Endpoints:
 - POST /sdapi/v1/txt2img
 - POST /sdapi/v1/img2img
 - POST /sdapi/v1/controlnet
 - POST /api/upscale             (simple factor-based upscaling)
+- POST /api/v1/generate         (async job submission)
+- GET  /api/v1/jobs             (list jobs)
+- GET  /api/v1/jobs/{id}        (job status)
+- GET  /api/v1/jobs/{id}/stream (SSE stream)
+- DELETE /api/v1/jobs/{id}      (cancel job)
+- GET  /api/v1/health
+- GET  /api/v1/models
+- GET  /api/v1/system
+- GET  /api/v1/queue
+- GET  /api/v1/stats
 
 Launch: python -m backend.api_server [host] [port]
 Default: host=0.0.0.0, port=7861
@@ -12,8 +22,10 @@ Default: host=0.0.0.0, port=7861
 
 import base64
 import json
+import re
 import sys
 import tempfile
+import time
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -33,6 +45,10 @@ HOST = "0.0.0.0"
 PORT = 7861
 DEFAULT_MODEL = "schnell-4-bit"
 _CURRENT_MODEL = None
+
+# Regex patterns for path-parameter routes
+_RE_JOB_STREAM = re.compile(r"^/api/v1/jobs/([a-f0-9]+)/stream$")
+_RE_JOB_DETAIL = re.compile(r"^/api/v1/jobs/([a-f0-9]+)$")
 
 
 def _current_model():
@@ -108,6 +124,7 @@ def _list_models_payload():
 def _bad_request(handler, message, status=400):
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     handler.wfile.write(json.dumps({"error": message}).encode("utf-8"))
 
@@ -115,8 +132,9 @@ def _bad_request(handler, message, status=400):
 def _json_response(handler, payload, status=200):
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
-    handler.wfile.write(json.dumps(payload).encode("utf-8"))
+    handler.wfile.write(json.dumps(payload, default=str).encode("utf-8"))
 
 
 def _encode_pil_to_base64(image):
@@ -142,27 +160,84 @@ def _save_temp_image(img: Image.Image) -> str:
 
 
 class APIServer(BaseHTTPRequestHandler):
+
+    # ── CORS ────────────────────────────────────────────────────────
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.end_headers()
+
+    # ── GET routing ─────────────────────────────────────────────────
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/sdapi/v1/options":
+        path = parsed.path
+
+        # Existing SD WebUI endpoints
+        if path == "/sdapi/v1/options":
             return self.handle_options()
-        if parsed.path == "/sdapi/v1/sd-models":
+        if path == "/sdapi/v1/sd-models":
             return self.handle_models()
+
+        # New v1 endpoints
+        if path == "/api/v1/health":
+            return self.handle_health()
+        if path == "/api/v1/models":
+            return self.handle_v1_models()
+        if path == "/api/v1/system":
+            return self.handle_system()
+        if path == "/api/v1/queue":
+            return self.handle_queue()
+        if path == "/api/v1/stats":
+            return self.handle_stats()
+        if path == "/api/v1/jobs":
+            return self.handle_list_jobs()
+
+        # Path-parameter routes
+        m = _RE_JOB_STREAM.match(path)
+        if m:
+            return self.handle_job_stream(m.group(1))
+        m = _RE_JOB_DETAIL.match(path)
+        if m:
+            return self.handle_get_job(m.group(1))
+
         return _bad_request(self, "Unknown endpoint", status=404)
+
+    # ── POST routing ────────────────────────────────────────────────
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/sdapi/v1/txt2img":
+        path = parsed.path
+
+        if path == "/sdapi/v1/txt2img":
             return self.handle_txt2img()
-        if parsed.path == "/sdapi/v1/img2img":
+        if path == "/sdapi/v1/img2img":
             return self.handle_img2img()
-        if parsed.path == "/sdapi/v1/controlnet":
+        if path == "/sdapi/v1/controlnet":
             return self.handle_controlnet()
-        if parsed.path == "/api/upscale":
+        if path == "/api/upscale":
             return self.handle_upscale()
-        if parsed.path == "/sdapi/v1/options":
+        if path == "/sdapi/v1/options":
             return self.handle_options_update()
+        if path == "/api/v1/generate":
+            return self.handle_generate()
+
         return _bad_request(self, "Unknown endpoint", status=404)
+
+    # ── DELETE routing ──────────────────────────────────────────────
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        m = _RE_JOB_DETAIL.match(parsed.path)
+        if m:
+            return self.handle_cancel_job(m.group(1))
+        return _bad_request(self, "Unknown endpoint", status=404)
+
+    # ── Shared helpers ──────────────────────────────────────────────
 
     def _read_json(self):
         try:
@@ -171,6 +246,8 @@ class APIServer(BaseHTTPRequestHandler):
             return json.loads(body.decode("utf-8"))
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Invalid JSON: {exc}") from exc
+
+    # ── Existing SD WebUI handlers (unchanged) ──────────────────────
 
     def handle_txt2img(self):
         try:
@@ -425,10 +502,188 @@ class APIServer(BaseHTTPRequestHandler):
         """
         return _json_response(self, _list_models_payload())
 
+    # ── New async job endpoints ─────────────────────────────────────
+
+    def handle_generate(self):
+        """POST /api/v1/generate - submit an async generation job."""
+        from backend.api_models import APIError, JobType
+        from backend.job_manager import get_job_manager
+
+        try:
+            data = self._read_json()
+        except Exception as exc:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.INVALID_JSON,
+                    message=str(exc),
+                ).to_dict()
+            }, status=400)
+
+        raw_type = data.get("type", "txt2img")
+        try:
+            job_type = JobType(raw_type)
+        except ValueError:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.INVALID_PARAM,
+                    message=f"Unknown job type: {raw_type}",
+                ).to_dict()
+            }, status=400)
+
+        prompt = data.get("prompt", "")
+        if job_type in (JobType.txt2img, JobType.img2img, JobType.controlnet) and not prompt:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.MISSING_PARAM,
+                    message="prompt is required",
+                ).to_dict()
+            }, status=400)
+
+        mgr = get_job_manager()
+        job = mgr.submit_job(job_type, data)
+        return _json_response(self, {
+            "job_id": job.id,
+            "status": job.status.value,
+            "type": job.job_type.value,
+        }, status=202)
+
+    def handle_get_job(self, job_id: str):
+        """GET /api/v1/jobs/{id} - get job status."""
+        from backend.api_models import APIError
+        from backend.job_manager import get_job_manager
+
+        mgr = get_job_manager()
+        job = mgr.get_job(job_id)
+        if job is None:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.JOB_NOT_FOUND,
+                    message=f"Job {job_id} not found",
+                ).to_dict()
+            }, status=404)
+        return _json_response(self, job.to_dict())
+
+    def handle_job_stream(self, job_id: str):
+        """GET /api/v1/jobs/{id}/stream - SSE event stream."""
+        from backend.api_models import APIError
+        from backend.job_manager import get_job_manager
+        from backend.sse_handler import stream_job_events
+
+        mgr = get_job_manager()
+        job = mgr.get_job(job_id)
+        if job is None:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.JOB_NOT_FOUND,
+                    message=f"Job {job_id} not found",
+                ).to_dict()
+            }, status=404)
+        stream_job_events(self, job)
+
+    def handle_cancel_job(self, job_id: str):
+        """DELETE /api/v1/jobs/{id} - cancel a job."""
+        from backend.api_models import APIError
+        from backend.job_manager import get_job_manager
+
+        mgr = get_job_manager()
+        job = mgr.cancel_job(job_id)
+        if job is None:
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.JOB_NOT_FOUND,
+                    message=f"Job {job_id} not found",
+                ).to_dict()
+            }, status=404)
+        return _json_response(self, {
+            "job_id": job.id,
+            "status": job.status.value,
+        })
+
+    def handle_list_jobs(self):
+        """GET /api/v1/jobs - list all jobs."""
+        from backend.job_manager import get_job_manager
+
+        mgr = get_job_manager()
+        jobs = mgr.list_jobs()
+        return _json_response(self, {
+            "jobs": [j.to_dict() for j in jobs],
+        })
+
+    # ── System info endpoints ───────────────────────────────────────
+
+    def handle_health(self):
+        """GET /api/v1/health"""
+        return _json_response(self, {
+            "status": "ok",
+            "timestamp": time.time(),
+        })
+
+    def handle_v1_models(self):
+        """GET /api/v1/models - models with capabilities."""
+        models = []
+        try:
+            aliases = get_updated_models()
+        except Exception:
+            aliases = [DEFAULT_MODEL]
+
+        for alias in aliases:
+            entry = {"name": alias, "capabilities": ["txt2img"]}
+            try:
+                cfg = get_custom_model_config(alias)
+                entry["base_arch"] = cfg.base_arch
+                entry["hf_name"] = cfg.model_name
+                if cfg.base_arch not in ("flux2",):
+                    entry["capabilities"].append("img2img")
+                    entry["capabilities"].append("controlnet")
+            except Exception:
+                pass
+            models.append(entry)
+        return _json_response(self, {"models": models})
+
+    def handle_system(self):
+        """GET /api/v1/system - memory, active model, queue depth."""
+        from backend.job_manager import get_job_manager
+
+        info = {
+            "active_model": _current_model(),
+            "queue_depth": get_job_manager().queue_depth(),
+        }
+        try:
+            import mlx.core as mx
+            info["memory"] = {
+                "active_mb": round(mx.metal.get_active_memory() / 1e6, 2),
+                "peak_mb": round(mx.metal.get_peak_memory() / 1e6, 2),
+            }
+        except Exception:
+            info["memory"] = None
+        return _json_response(self, info)
+
+    def handle_queue(self):
+        """GET /api/v1/queue"""
+        from backend.job_manager import get_job_manager
+        from backend.api_models import JobStatus
+
+        mgr = get_job_manager()
+        jobs = mgr.list_jobs()
+        pending = [j.to_dict() for j in jobs if j.status == JobStatus.queued]
+        running = [j.to_dict() for j in jobs if j.status == JobStatus.running]
+        return _json_response(self, {
+            "pending": pending,
+            "pending_count": len(pending),
+            "running": running,
+            "running_count": len(running),
+        })
+
+    def handle_stats(self):
+        """GET /api/v1/stats"""
+        from backend.job_manager import get_job_manager
+
+        return _json_response(self, get_job_manager().get_stats())
+
 
 def run_server(host: str = HOST, port: int = PORT):
     server = ThreadingHTTPServer((host, port), APIServer)
-    print(f"API server running on http://{host}:{port} (txt2img/img2img/controlnet/upscale)")
+    print(f"API server running on http://{host}:{port} (txt2img/img2img/controlnet/upscale + async /api/v1)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

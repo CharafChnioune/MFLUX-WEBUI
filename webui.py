@@ -70,6 +70,7 @@ _ensure_gradio()
 
 from frontend.gradioui import create_ui
 from backend.api_server import run_server as run_api_server
+from backend.job_manager import get_job_manager
 
 if __name__ == "__main__":
     # Start lightweight API server (SD WebUI-compatible txt2img) alongside the UI
@@ -88,6 +89,10 @@ if __name__ == "__main__":
 
     threading.Thread(target=_start_api, name="api-server", daemon=True).start()
     print(f"[API] Starting API server on http://{api_host}:{api_port} (endpoint: /sdapi/v1/txt2img)")
+
+    # Start async job manager (worker + cleanup threads)
+    get_job_manager()
+    print("[API] Job manager started (async /api/v1/generate endpoint ready)")
 
     demo, theme, custom_css = create_ui()
     try:

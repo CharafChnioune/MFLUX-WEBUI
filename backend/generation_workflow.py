@@ -20,13 +20,15 @@ class GenerationWorkflow:
         self.auto_seeds_manager = get_auto_seeds_manager()
         self.dynamic_prompts_manager = get_dynamic_prompts_manager()
         self.config_manager = get_config_manager()
-        
+
         self.is_paused = False
         self.should_stop = False
         self.generation_stats = {
             "total_generated": 0,
             "failed_generations": 0,
         }
+        self._current_job_id: Optional[str] = None
+        self._cancel_requested: Optional[str] = None
     
     def pre_generation_checks(self) -> Dict[str, Any]:
         """Run pre-generation checks and return status"""
@@ -85,8 +87,33 @@ class GenerationWorkflow:
             import random
             return random.randint(0, 2**32 - 1)
     
+    def request_cancel(self, job_id: str):
+        """Request cancellation of a running job."""
+        self._cancel_requested = job_id
+        if self._current_job_id == job_id:
+            self.should_stop = True
+
+    def set_current_job(self, job_id: Optional[str]):
+        """Set the currently executing job ID."""
+        self._current_job_id = job_id
+        if job_id is not None and self._cancel_requested == job_id:
+            self.should_stop = True
+
+    def clear_current_job(self):
+        """Clear the current job tracking."""
+        self._current_job_id = None
+
     def monitor_generation_progress(self, step: int, total_steps: int) -> Dict[str, Any]:
         """Monitor generation progress and check for interruptions"""
+        if self.should_stop:
+            return {
+                "should_continue": False,
+                "should_pause": False,
+                "step": step,
+                "total_steps": total_steps,
+                "progress": step / total_steps if total_steps > 0 else 0,
+                "stop_reason": "cancelled",
+            }
         return {
             "should_continue": True,
             "should_pause": False,
@@ -147,6 +174,8 @@ class GenerationWorkflow:
         """Reset workflow state for new generation batch"""
         self.is_paused = False
         self.should_stop = False
+        self._current_job_id = None
+        self._cancel_requested = None
 
 
 # Global workflow instance

@@ -462,10 +462,11 @@ def simple_generate_image(
         force_mlx_cleanup()
 
 def generate_image_gradio(
-    prompt, model, base_model, seed, width, height, steps, guidance, 
+    prompt, model, base_model, seed, width, height, steps, guidance,
     lora_files, metadata, ollama_model=None, system_prompt=None,
-    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
-    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False, auto_seeds=None
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None,
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False, auto_seeds=None,
+    progress_callback=None
 ):
     """
     Generate images using the Flux model through the Gradio interface with v0.9.0 features.
@@ -670,6 +671,8 @@ def generate_image_gradio(
                     continue
 
                 # Initialize Flux model
+                if progress_callback:
+                    progress_callback("stage", "loading_model")
                 flux = get_or_create_flux(
                     model=model,
                     lora_paths=lora_files,
@@ -698,6 +701,12 @@ def generate_image_gradio(
                 steps_int = 4 if not steps or steps.strip() == "" else int(steps)
                 
                 # Generate the image with progress monitoring
+                if progress_callback:
+                    progress_callback("image_start", {
+                        "current_image": i + 1,
+                        "total_images": len(seeds),
+                        "seed": current_seed,
+                    })
                 print(f"Generating image {i+1}/{len(seeds)} with seed: {current_seed}")
                 generated = flux.generate_image(
                     seed=current_seed,
@@ -746,9 +755,19 @@ def generate_image_gradio(
                 # Update statistics
                 update_generation_stats(success=True)
                 
+                if progress_callback:
+                    progress_callback("image_complete", {
+                        "current_image": i + 1,
+                        "total_images": len(seeds),
+                    })
                 print(f"Successfully generated image {i+1} with seed {current_seed}")
-                
+
             except Exception as e:
+                if progress_callback:
+                    progress_callback("image_error", {
+                        "current_image": i + 1,
+                        "error": str(e),
+                    })
                 print(f"Error generating image {i+1} with seed {current_seed}: {str(e)}")
                 import traceback
                 traceback.print_exc()
@@ -796,8 +815,9 @@ def generate_image_gradio(
 def generate_image_controlnet_gradio(
     prompt, control_image, model, base_model, seed, height, width, steps, guidance,
     controlnet_strength, lora_files, metadata, save_canny,
-    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
-    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None,
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False,
+    progress_callback=None
 ):
     """
     Generate an image with controlnet guidance.
@@ -868,6 +888,8 @@ def generate_image_controlnet_gradio(
             seed = int(time.time())
         
         # Initialize Flux1Controlnet
+        if progress_callback:
+            progress_callback("stage", "loading_model")
         flux = get_or_create_flux(
             model=model,
             lora_paths=lora_paths,
@@ -881,9 +903,15 @@ def generate_image_controlnet_gradio(
             return [], "Could not initialize ControlNet", prompt
             
         try:
+            if progress_callback:
+                progress_callback("image_start", {
+                    "current_image": 1,
+                    "total_images": 1,
+                    "seed": seed,
+                })
             print(f"Generating controlnet image with seed: {seed}")
             current_seed = seed
-            
+
             # Guidance waarde: we zorgen ervoor dat het nooit None is
             if guidance is None:
                 is_dev_model = "dev" in model
@@ -894,10 +922,10 @@ def generate_image_controlnet_gradio(
             is_flux2 = is_flux2_model_name(model)
             if is_flux2:
                 guidance_value = 1.0
-                
+
             steps_int = 4 if not steps or steps.strip() == "" else int(steps)
             controlnet_strength_float = float(controlnet_strength)
-            
+
             # Generate the image
             generated = flux.generate_image(
                 seed=current_seed,
@@ -1001,10 +1029,17 @@ def generate_image_controlnet_gradio(
                 with open(metadata_path, "w") as f:
                     json.dump(metadata_dict, f, indent=2)
                     
+            if progress_callback:
+                progress_callback("image_complete", {
+                    "current_image": 1,
+                    "total_images": 1,
+                })
             print(f"Generated controlnet image saved to {output_path}")
             return [pil_image], filename, prompt
-            
+
         except Exception as e:
+            if progress_callback:
+                progress_callback("image_error", {"current_image": 1, "error": str(e)})
             print(f"Error in controlnet image generation: {str(e)}")
             import traceback
             traceback.print_exc()
@@ -1026,8 +1061,9 @@ def generate_image_controlnet_gradio(
 def generate_image_i2i_gradio(
     prompt, input_image, model, base_model, seed, height, width, steps, guidance,
     image_strength, lora_files, metadata,
-    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None, 
-    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False
+    prompt_file=None, config_from_metadata=None, stepwise_output_dir=None,
+    vae_tiling=False, vae_tiling_split=1, *lora_scales, num_images=1, low_ram=False,
+    progress_callback=None
 ):
     """
     Generate an image based on an input image.
@@ -1094,6 +1130,8 @@ def generate_image_i2i_gradio(
             seed = int(time.time())
         
         # Initialize Flux
+        if progress_callback:
+            progress_callback("stage", "loading_model")
         flux = get_or_create_flux(
             model=model,
             image=input_image_path,  # Merk op: hier gebruiken we image parameter
@@ -1107,9 +1145,15 @@ def generate_image_i2i_gradio(
             return [], "Could not initialize Flux for image-to-image", prompt
             
         try:
+            if progress_callback:
+                progress_callback("image_start", {
+                    "current_image": 1,
+                    "total_images": 1,
+                    "seed": seed,
+                })
             print(f"Generating image-to-image with seed: {seed}")
             current_seed = seed
-            
+
             # Guidance waarde: we zorgen ervoor dat het nooit None is
             if guidance is None:
                 is_dev_model = "dev" in model
@@ -1184,10 +1228,17 @@ def generate_image_i2i_gradio(
                 with open(metadata_path, "w") as f:
                     json.dump(metadata_dict, f, indent=2)
                     
+            if progress_callback:
+                progress_callback("image_complete", {
+                    "current_image": 1,
+                    "total_images": 1,
+                })
             print(f"Generated image-to-image saved to {output_path}")
             return [pil_image], filename, prompt
-            
+
         except Exception as e:
+            if progress_callback:
+                progress_callback("image_error", {"current_image": 1, "error": str(e)})
             print(f"Error in image-to-image generation: {str(e)}")
             import traceback
             traceback.print_exc()
