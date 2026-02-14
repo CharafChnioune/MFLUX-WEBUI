@@ -90,9 +90,12 @@ curl -X POST http://localhost:7861/sdapi/v1/txt2img \
 | `flux2-klein-base-9b-4-bit` | Runtime quantized (base) | Varies | Fast high quality (base) |
 | `flux2-klein-base-9b-6-bit` | Runtime quantized (base) | Varies | Premium quality/speed (base) |
 | `flux2-klein-base-9b-8-bit` | Runtime quantized (base) | Varies | Maximum quality (base) |
+| `flux2-dev` | **Experimental** FLUX.2-dev (very large) | ~100GB+ | Only for high-RAM machines; experimental loader |
+| `flux2-dev-4-bit` | **Experimental** runtime-quantized | Varies | Requires initial full download; reduces RAM after quantization |
+| `flux2-dev-8-bit` | **Experimental** runtime-quantized | Varies | Requires initial full download; reduces RAM after quantization |
 | `seedvr2` | Video/image model | Varies | Experimental |
 
-**Note**: Distilled Flux2 Klein models use fixed guidance=1.0. Base models allow guidance > 1.0.
+**Note**: Distilled Flux2 Klein models use fixed guidance=1.0. Base models (and `flux2-dev`) allow guidance > 1.0.
 
 ---
 

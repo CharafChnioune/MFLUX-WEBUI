@@ -52,6 +52,11 @@ def is_flux2_base_model_name(model_name: str) -> bool:
     return normalized.startswith(("flux2-", "klein-")) and "-base-" in normalized
 
 
+def is_flux2_dev_model_name(model_name: str) -> bool:
+    normalized = strip_quant_suffix(model_name or "").lower()
+    return normalized == "flux2-dev"
+
+
 def save_image_with_metadata(pil_image, output_path: str, metadata: dict):
     """
     Save a PIL image with PNG textual metadata (prompt, seed, etc.).
@@ -158,7 +163,11 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
             except Exception:
                 pass
 
-        model_config = resolve_mflux_model_config(config_name, base_model_override)
+        if is_flux2_dev_model_name(config_name):
+            from backend.flux2_dev import _default_flux2_dev_model_config
+            model_config = _default_flux2_dev_model_config()
+        else:
+            model_config = resolve_mflux_model_config(config_name, base_model_override)
 
         if "-8-bit" in model:
             quantize = 8
@@ -175,6 +184,38 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
             if is_controlnet:
                 print("Flux2 does not support ControlNet.")
                 return None
+
+            if is_flux2_dev_model_name(config_name):
+                if image is not None:
+                    print("Flux2-dev edit is not yet supported.")
+                    return None
+                try:
+                    from backend.flux2_dev import Flux2Dev
+                except Exception as exc:
+                    print(f"Flux2-dev loader is unavailable: {exc}")
+                    return None
+
+                if not lora_paths:
+                    lora_scales = None
+                elif lora_scales is None:
+                    lora_scales = []
+                elif isinstance(lora_scales, tuple):
+                    lora_scales = list(lora_scales)
+
+                print(
+                    f"Creating Flux2Dev with model_config={model_config}, "
+                    f"quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, "
+                    f"lora_scales={lora_scales}"
+                )
+                flux = Flux2Dev(
+                    model_config=model_config,
+                    quantize=quantize,
+                    model_path=str(model_path) if model_path else None,
+                    lora_paths=lora_paths,
+                    lora_scales=lora_scales,
+                )
+                return flux
+
             if Flux2Klein is None or Flux2KleinEdit is None:
                 print("Flux2 classes are unavailable. Ensure mflux>=0.15.0 is installed.")
                 return None
@@ -247,7 +288,9 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
             cfg_name = getattr(cfg, "model_name", "") if cfg is not None else ""
             is_base = "-base-" in str(cfg_name).lower()
 
-        if not is_base and guidance != 1.0:
+        is_dev = is_flux2_dev_model_name(model_name or "") or "flux.2-dev" in str(cfg_name).lower()
+
+        if not is_base and not is_dev and guidance != 1.0:
             print("FLUX.2 (distilled) uses guidance=1.0; overriding guidance.")
             guidance = 1.0
 

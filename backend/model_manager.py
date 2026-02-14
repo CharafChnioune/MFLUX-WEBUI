@@ -64,6 +64,9 @@ def _register_default_models():
         ("flux2-klein-base-4b-mlx-4bit", "AITRADER/FLUX2-klein-base-4B-mlx-4bit", 512, "flux2"),
         ("flux2-klein-base-4b-mlx-8bit", "AITRADER/FLUX2-klein-base-4B-mlx-8bit", 512, "flux2"),
         ("flux2-klein-base-9b", "black-forest-labs/FLUX.2-klein-base-9B", 512, "flux2"),
+        # Experimental: upstream mflux does not currently ship a Flux2-dev implementation.
+        # This entry is for the WebUI's experimental loader branch.
+        ("flux2-dev", "black-forest-labs/FLUX.2-dev", 512, "flux2"),
         ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
     for alias, repo, seq_len, base_arch in official:
@@ -124,6 +127,11 @@ def _flux2_ordered() -> List[str]:
         "flux2-klein-base-9b-4-bit",
         "flux2-klein-base-9b-6-bit",
         "flux2-klein-base-9b-8-bit",
+        "flux2-dev",
+        "flux2-dev-3-bit",
+        "flux2-dev-4-bit",
+        "flux2-dev-6-bit",
+        "flux2-dev-8-bit",
     ]
 
 
@@ -359,6 +367,13 @@ def update_guidance_visibility(model):
     """
     model_name = (model or "").lower()
     if model_name.startswith(("flux2-", "klein-")):
+        if model_name.startswith("flux2-dev"):
+            return gr.update(
+                visible=True,
+                label="Guidance Scale (FLUX.2-dev, experimental)",
+                value=3.5,
+                interactive=True,
+            )
         if "-base-" in model_name:
             return gr.update(
                 visible=True,

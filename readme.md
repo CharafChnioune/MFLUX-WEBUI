@@ -64,17 +64,20 @@ If you were using the UI version:
 
 ---
 
-## Supported Models (Flux2 Klein Only)
+## Supported Models (Flux2)
 
-- `flux2-klein-4b` (default) - 4B base model
+- `flux2-klein-4b` (default) - Distilled 4B model (guidance fixed at 1.0)
 - `flux2-klein-4b-mlx-4bit` - Pre-quantized 4-bit
 - `flux2-klein-4b-mlx-8bit` - Pre-quantized 8-bit
-- `flux2-klein-9b` - 9B base model (highest quality)
+- `flux2-klein-9b` - Distilled 9B model (highest quality; guidance fixed at 1.0)
 - `flux2-klein-9b-mlx-4bit` - Pre-quantized 4-bit
 - `flux2-klein-9b-mlx-8bit` - Pre-quantized 8-bit
-- All models support runtime quantization (3/4/6/8-bit)
+- `flux2-klein-base-4b` - Base 4B model (guidance > 1.0 supported)
+- `flux2-klein-base-9b` - Base 9B model (guidance > 1.0 supported)
+- `flux2-dev` - Experimental FLUX.2-dev (very large; high-RAM machines only)
+- All models support runtime quantization (3/4/6/8-bit).
 
-**Note**: Flux2 uses **fixed guidance=1.0** (not adjustable).
+**Note**: Distilled FLUX.2 Klein models use **fixed guidance=1.0**. Base models (and `flux2-dev`) allow guidance > 1.0.
 
 ---
 
