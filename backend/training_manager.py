@@ -1,129 +1,198 @@
-import os
-import json
-import subprocess
-import tempfile
-import traceback
-import threading
-import queue
-from PIL import Image
-from pathlib import Path
-import time
+from __future__ import annotations
 
-# Create configs directory if it doesn't exist
-configs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
-os.makedirs(configs_dir, exist_ok=True)
+import json
+import os
+import queue
+import random
+import subprocess
+import sys
+import threading
+import time
+import traceback
+from pathlib import Path
+from typing import Iterable, Iterator, List, Optional
+
+from PIL import Image
+
+# Keep debug artifacts inside the repo (workspace-write safe).
+configs_dir = Path(__file__).resolve().parent.parent / "configs"
+configs_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_square_size(value: str) -> int:
+    """
+    UI provides sizes like "512x512". For training we use max_resolution (largest side cap).
+    """
+    raw = (value or "").strip().lower()
+    if "x" not in raw:
+        return int(float(raw))
+    left = raw.split("x", 1)[0].strip()
+    return int(float(left))
+
+
+def _safe_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _resize_image(input_path: str, output_path: str, max_side: int) -> None:
+    """
+    Resize while preserving aspect ratio. Training also supports mixed aspect ratios,
+    but this keeps memory predictable for UI users.
+    """
+    with Image.open(input_path) as img:
+        img = img.convert("RGB")
+        width, height = img.size
+        if max(width, height) <= max_side:
+            img.save(output_path)
+            return
+        ratio = max_side / float(max(width, height))
+        new_size = (max(1, int(round(width * ratio))), max(1, int(round(height * ratio))))
+        resized = img.resize(new_size, Image.Resampling.LANCZOS)
+        resized.save(output_path)
+
+
+def _training_defaults(model_name: str) -> tuple[int, float]:
+    """
+    Return (steps, guidance) defaults matching MFLUX 0.16+ docs.
+    """
+    m = (model_name or "").strip().lower()
+    if m in {"z-image-turbo", "zimage-turbo"}:
+        return 9, 0.0
+    if m in {"z-image", "zimage"}:
+        return 50, 4.0
+    if m.startswith("flux2-") and "-base-" in m:
+        return 40, 1.0
+    return 50, 1.0
+
+
+def _lora_targets_for_model(
+    model_name: str,
+    *,
+    lora_rank: int,
+    transformer_blocks_enabled: bool,
+    transformer_start: int,
+    transformer_end: int,
+    single_blocks_enabled: bool,
+    single_start: int,
+    single_end: int,
+) -> list[dict]:
+    model = (model_name or "").strip().lower()
+    rank = int(lora_rank)
+
+    if model in {"z-image", "zimage", "z-image-turbo", "zimage-turbo"}:
+        if not transformer_blocks_enabled:
+            raise ValueError("Z-Image training requires Transformer Blocks enabled (layers.{block}.* targets).")
+        if transformer_end <= transformer_start:
+            raise ValueError("Transformer block range must have end > start.")
+        blocks = {"start": int(transformer_start), "end": int(transformer_end)}
+        # Minimal, stable targets (matches Z-Image README example).
+        return [
+            {"module_path": "layers.{block}.attention.to_q", "blocks": blocks, "rank": rank},
+            {"module_path": "layers.{block}.attention.to_k", "blocks": blocks, "rank": rank},
+            {"module_path": "layers.{block}.attention.to_v", "blocks": blocks, "rank": rank},
+        ]
+
+    if model.startswith("flux2-") and "-base-" in model:
+        targets: list[dict] = []
+        if transformer_blocks_enabled:
+            if transformer_end <= transformer_start:
+                raise ValueError("Transformer block range must have end > start.")
+            blocks = {"start": int(transformer_start), "end": int(transformer_end)}
+            for module_path in (
+                "transformer_blocks.{block}.attn.to_q",
+                "transformer_blocks.{block}.attn.to_k",
+                "transformer_blocks.{block}.attn.to_v",
+                "transformer_blocks.{block}.attn.to_out",
+                "transformer_blocks.{block}.attn.add_q_proj",
+                "transformer_blocks.{block}.attn.add_k_proj",
+                "transformer_blocks.{block}.attn.add_v_proj",
+                "transformer_blocks.{block}.attn.to_add_out",
+                "transformer_blocks.{block}.ff.linear_in",
+                "transformer_blocks.{block}.ff.linear_out",
+                "transformer_blocks.{block}.ff_context.linear_in",
+                "transformer_blocks.{block}.ff_context.linear_out",
+            ):
+                targets.append({"module_path": module_path, "blocks": blocks, "rank": rank})
+
+        if single_blocks_enabled:
+            if single_end <= single_start:
+                raise ValueError("Single transformer block range must have end > start.")
+            blocks = {"start": int(single_start), "end": int(single_end)}
+            for module_path in (
+                "single_transformer_blocks.{block}.attn.to_qkv_mlp_proj",
+                "single_transformer_blocks.{block}.attn.to_out",
+            ):
+                targets.append({"module_path": module_path, "blocks": blocks, "rank": rank})
+
+        if not targets:
+            raise ValueError("No LoRA targets selected. Enable Transformer Blocks and/or Single Transformer Blocks.")
+        return targets
+
+    raise ValueError(
+        f"Unsupported training model: {model_name!r}. Supported: z-image, z-image-turbo, flux2-klein-base-4b/9b."
+    )
+
 
 def prepare_training_config(
-    base_model,
-    trigger_word,
-    epochs,
-    batch_size,
-    lora_rank,
-    output_dir,
-    transformer_blocks_enabled,
-    transformer_start,
-    transformer_end,
-    single_blocks_enabled,
-    single_start,
-    single_end,
-    image_size,
-    tmpdir,
-    learning_rate="0.0001",
-    seed=42,
-    checkpoint_frequency=10,
-    validation_prompt="",
-    guidance_scale=3.0,
-    low_ram_mode=True
-):
+    model_name: str,
+    *,
+    data_path: str,
+    output_path: str,
+    seed: int,
+    steps: int,
+    guidance: float,
+    quantize: int | None,
+    max_resolution: int,
+    low_ram: bool,
+    num_epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    checkpoint_frequency: int,
+    lora_targets: list[dict],
+) -> dict:
     """
-    Prepare the training configuration.
+    Generate an MFLUX >= 0.16 training config (used by `mflux-train`).
     """
-    target_size = int(image_size.split('x')[0])
-    output_dir = os.path.expanduser(output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Convert learning_rate to float (it comes as string from the dropdown)
-    learning_rate_float = float(learning_rate)
-    
-    # Als validation_prompt leeg is, gebruik de trigger_word
-    if not validation_prompt:
-        validation_prompt = trigger_word
-
-    config = {
-        "model": "dev" if "dev" in base_model else "schnell",
+    return {
+        "model": model_name,
+        "data": data_path,
         "seed": int(seed),
-        "steps": 20,
-        "guidance": float(guidance_scale),
-        "quantize": 4 if base_model.endswith("-4-bit") else (8 if base_model.endswith("-8-bit") else None),
-        "width": target_size,
-        "height": target_size,
+        "steps": int(steps),
+        "guidance": float(guidance),
+        "quantize": None if quantize in (None, 0, "0", "None") else int(quantize),
+        "max_resolution": int(max_resolution) if max_resolution else None,
+        "low_ram": bool(low_ram),
         "training_loop": {
-            "num_epochs": int(epochs),
-            "batch_size": int(batch_size)
+            "num_epochs": int(num_epochs),
+            "batch_size": int(batch_size),
         },
         "optimizer": {
             "name": "AdamW",
-            "learning_rate": learning_rate_float
+            "learning_rate": float(learning_rate),
         },
-        "save": {
-            "output_path": os.path.abspath(output_dir),
-            "checkpoint_frequency": int(checkpoint_frequency)
+        "checkpoint": {
+            "save_frequency": int(checkpoint_frequency),
+            "output_path": str(output_path),
         },
-        "instrumentation": {
+        "monitoring": {
             "plot_frequency": 1,
-            "generate_image_frequency": 20,
-            "validation_prompt": validation_prompt
+            "generate_image_frequency": int(checkpoint_frequency),
         },
-        "lora_layers": {},
-        "examples": {
-            "path": tmpdir,
-            "images": []
-        }
+        "lora_layers": {
+            "targets": lora_targets,
+        },
     }
-    
-    # Only add one type of transformer blocks based on what's enabled
-    if transformer_blocks_enabled:
-        config["lora_layers"]["transformer_blocks"] = {
-            "block_range": {
-                "start": int(transformer_start),
-                "end": int(transformer_end)
-            },
-            "layer_types": [
-                "attn.to_q",
-                "attn.to_k",
-                "attn.to_v",
-                "attn.to_out"
-            ],
-            "lora_rank": int(lora_rank)
-        }
-    elif single_blocks_enabled:
-        config["lora_layers"]["single_transformer_blocks"] = {
-            "block_range": {
-                "start": int(single_start),
-                "end": min(int(single_end), 38)
-            },
-            "layer_types": [
-                "proj_out",
-                "proj_mlp",
-                "attn.to_q",
-                "attn.to_k",
-                "attn.to_v"
-            ],
-            "lora_rank": int(lora_rank)
-        }
 
-    return config
-
-def resize_image(input_path, output_path, target_size):
-    """
-    Resize an image while maintaining aspect ratio.
-    """
-    with Image.open(input_path) as img:
-        width, height = img.size
-        ratio = min(target_size / width, target_size / height)
-        new_size = (int(width * ratio), int(height * ratio))
-        resized = img.resize(new_size, Image.Resampling.LANCZOS)
-        resized.save(output_path)
 
 def run_training(
     base_model,
@@ -132,9 +201,15 @@ def run_training(
     epochs,
     batch_size,
     lora_rank,
+    learning_rate,
+    seed,
+    checkpoint_frequency,
+    validation_prompt,
+    guidance_scale,
+    quantize_bits,
+    low_ram_mode,
     output_dir,
     resume_checkpoint,
-    mlx_vlm_model,
     transformer_blocks_enabled,
     transformer_start,
     transformer_end,
@@ -142,373 +217,223 @@ def run_training(
     single_start,
     single_end,
     image_size,
-    learning_rate,
-    seed,
-    checkpoint_frequency,
-    validation_prompt,
-    guidance_scale,
-    low_ram_mode,
-    *captions
-):
+    *captions,
+) -> Iterator[str]:
     """
-    Run the training process.
+    Run LoRA training using `mflux-train` (MFLUX >= 0.16).
+
+    The UI still calls this "Dreambooth", but upstream training is now a common LoRA stack.
     """
     try:
-        yield "Starting training process...\n\n"
-        
-        # Save debug config
-        debug_config = {
-            "base_model": base_model,
-            "trigger_word": trigger_word,
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "lora_rank": lora_rank,
-            "output_dir": output_dir,
-            "transformer_blocks_enabled": transformer_blocks_enabled,
-            "transformer_start": transformer_start, 
-            "transformer_end": transformer_end,
-            "single_blocks_enabled": single_blocks_enabled,
-            "single_start": single_start,
-            "single_end": single_end,
-            "image_size": image_size,
-            "learning_rate": learning_rate,
-            "seed": seed,
-            "checkpoint_frequency": checkpoint_frequency,
-            "validation_prompt": validation_prompt,
-            "guidance_scale": guidance_scale,
-            "low_ram_mode": low_ram_mode,
-            "captions": list(captions),
-            "uploaded_files": [f.name for f in uploaded_files]
-        }
-        
-        # Save debug config in configs directory instead of output directory
-        debug_path = os.path.join(configs_dir, "dreambooth_debug_config.json")
-        
-        with open(debug_path, "w") as f:
-            json.dump(debug_config, f, indent=2)
-            
-        yield f"[DEBUG] Saved debug config to: {debug_path}\n"
-        
-        captions = list(captions)
-        tmpdir = None
+        model_name = str(base_model or "").strip()
+        if not model_name:
+            raise ValueError("Training model is required.")
 
-        yield "Input parameters:\n"
-        yield f"• Base model: {base_model}\n"
-        yield f"• Number of images: {len(uploaded_files)}\n"
-        yield f"• Trigger word: {trigger_word}\n"
-        yield f"• Epochs: {epochs}\n"
-        yield f"• Batch size: {batch_size}\n"
-        yield f"• LoRA rank: {lora_rank}\n"
-        yield f"• Learning rate: {learning_rate}\n"
-        yield f"• Random seed: {seed}\n"
-        yield f"• Checkpoint frequency: {checkpoint_frequency}\n"
-        yield f"• Validation prompt: {validation_prompt or 'Using trigger word'}\n"
-        yield f"• Guidance scale: {guidance_scale}\n"
-        yield f"• Low RAM mode: {low_ram_mode}\n"
-        yield f"• Output directory: {output_dir}\n"
-        yield f"• Resume checkpoint: {resume_checkpoint}\n"
-        yield f"• Image size: {image_size}\n"
-        yield f"• Transformer blocks enabled: {transformer_blocks_enabled}\n"
-        yield f"• Single blocks enabled: {single_blocks_enabled}\n\n"
-        
-        target_size = int(image_size.split('x')[0])
-        yield f"Processing images to {target_size}x{target_size}...\n"
-        
-        tmpdir = tempfile.mkdtemp(prefix="mflux_dreambooth_")
-        yield f"Created temporary directory: {tmpdir}\n"
-        
-        output_dir = os.path.expanduser(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
+        resume_checkpoint = str(resume_checkpoint or "").strip()
+        output_root = Path(os.path.expanduser(str(output_dir or ""))).resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        run_id = time.strftime("%Y%m%d_%H%M%S")
+        run_suffix = f"{random.randint(1000, 9999)}"
+        run_root = output_root / f"lora_train_{run_id}_{run_suffix}"
+        run_root.mkdir(parents=True, exist_ok=False)
+        data_dir = run_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        yield f"Run folder: {run_root}\n"
+
+        # Resume mode: don't create new data/config; just run resume.
+        if resume_checkpoint:
+            ckpt_path = Path(os.path.expanduser(resume_checkpoint))
+            if not ckpt_path.exists():
+                raise ValueError(f"Checkpoint not found: {ckpt_path}")
+            cmd = [sys.executable, "-m", "mflux.models.common.cli.train", "--resume", str(ckpt_path)]
+            yield f"Starting resume:\n{' '.join(cmd)}\n\n"
+            yield from _run_subprocess_stream(cmd)
+            return
+
+        if not uploaded_files:
+            raise ValueError("Please upload training images (or provide a resume checkpoint).")
+
+        max_resolution = _parse_square_size(str(image_size or "1024x1024"))
+        steps_default, guidance_default = _training_defaults(model_name)
+
+        steps = steps_default
+        guidance = guidance_default if guidance_scale in (None, "", "None") else _safe_float(guidance_scale, guidance_default)
+        if str(model_name).strip().lower() in {"z-image-turbo", "zimage-turbo"}:
+            guidance = 0.0
+
+        # Build LoRA targets
+        targets = _lora_targets_for_model(
+            model_name,
+            lora_rank=_safe_int(lora_rank, 8),
+            transformer_blocks_enabled=bool(transformer_blocks_enabled),
+            transformer_start=_safe_int(transformer_start, 0),
+            transformer_end=_safe_int(transformer_end, 30),
+            single_blocks_enabled=bool(single_blocks_enabled),
+            single_start=_safe_int(single_start, 0),
+            single_end=_safe_int(single_end, 20),
+        )
+
+        # Prepare dataset (limit to the caption UI)
+        captions_list = list(captions)
+        used_files = list(uploaded_files)[: max(1, len(captions_list))]
+
+        yield f"Preparing dataset: {len(used_files)} image(s)\n"
+        for idx, fdata in enumerate(used_files, start=1):
+            in_path = getattr(fdata, "name", None) or str(fdata)
+            stem = f"{idx:03d}"
+            out_img = data_dir / f"{stem}.png"
+            out_txt = data_dir / f"{stem}.txt"
+
+            prompt = ""
+            if idx - 1 < len(captions_list):
+                prompt = str(captions_list[idx - 1] or "").strip()
+            if not prompt:
+                prompt = str(trigger_word or "").strip() or "a photo"
+
+            _resize_image(in_path, str(out_img), max_side=max_resolution)
+            out_txt.write_text(prompt, encoding="utf-8")
+
+        # Optional preview prompt (if provided)
+        preview_prompt = str(validation_prompt or "").strip()
+        if preview_prompt:
+            (data_dir / "preview_1.txt").write_text(preview_prompt, encoding="utf-8")
+
+        # Training config lives next to the data for reproducibility/resume.
+        config_path = run_root / "train.json"
+        debug_path = configs_dir / "train_debug.json"
+
+        quantize = None if quantize_bits in (None, "", "None", 0, "0") else _safe_int(quantize_bits, 0)
 
         config = prepare_training_config(
-            base_model,
-            trigger_word,
-            epochs,
-            batch_size,
-            lora_rank,
-            output_dir,
-            transformer_blocks_enabled,
-            transformer_start,
-            transformer_end,
-            single_blocks_enabled,
-            single_start,
-            single_end,
-            image_size,
-            tmpdir,
-            learning_rate,
-            seed,
-            checkpoint_frequency,
-            validation_prompt,
-            guidance_scale,
-            low_ram_mode
+            model_name=model_name,
+            data_path="data",
+            output_path=str(run_root / "output"),
+            seed=_safe_int(seed, 42),
+            steps=steps,
+            guidance=guidance,
+            quantize=quantize or None,
+            max_resolution=max_resolution,
+            low_ram=bool(low_ram_mode),
+            num_epochs=_safe_int(epochs, 50),
+            batch_size=_safe_int(batch_size, 1),
+            learning_rate=_safe_float(learning_rate, 1e-4),
+            checkpoint_frequency=_safe_int(checkpoint_frequency, 25),
+            lora_targets=targets,
         )
 
-        yield "\nProcessing images:\n"
-        for i, (fdata, ctext) in enumerate(zip(uploaded_files, captions)):
-            if not ctext:
-                continue
-            ext = os.path.splitext(fdata.name)[1]
-            out_fn = f"img_{i}{ext}"
-            out_path = os.path.join(tmpdir, out_fn)
-            
-            yield f"• Image {i+1}: {fdata.name}\n"
-            yield f"  Caption: {ctext}\n"
-            
-            resize_image(fdata.name, out_path, target_size)
-
-            config["examples"]["images"].append({
-                "image": out_fn,
-                "prompt": f"{ctext}"
-            })
-
-        config_path = os.path.join(tmpdir, "config.json")
-        project_config_path = os.path.join(os.getcwd(), "last_training_config.json")
-        
-        yield "\nSaving configs:\n"
-        yield f"• Temp config: {config_path}\n"
-        yield f"• Project config: {project_config_path}\n"
-        
-        for save_path in [config_path, project_config_path]:
-            with open(save_path, "w") as f:
-                json.dump(config, f, indent=2)
-
-        if not config["examples"]["images"]:
-            raise ValueError("No valid image-caption pairs found in configuration")
-        
-        if not config["lora_layers"]:
-            raise ValueError("No LoRA layers configured. Enable either transformer blocks or single transformer blocks")
-        
-        if not os.path.isdir(config["examples"]["path"]):
-            raise ValueError(f"Images directory not found: {config['examples']['path']}")
-
-        train_cmd = [
-            "python",
-            os.path.join(os.path.dirname(__file__), 'custom_train.py'),
-            "--train-config",
-            config_path,
-            "--model",
-            "dev" if "dev" in base_model else "schnell"
-        ]
-        
-        if config["quantize"]:
-            train_cmd.extend(["--quantize", str(config["quantize"])])
-        
-        # Add env variable to skip huggingface hub authentication by setting the token to be empty
-        os.environ["HF_TOKEN"] = ""
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = ""
-            
-        # Voeg low-ram optie toe indien nodig
-        if low_ram_mode:
-            train_cmd.append("--low-ram")
-        
-        # Gebruik lokaal model pad indien beschikbaar
-        if "dev" in base_model:
-            model_name = "AITRADER/MFLUXUI.1-dev"
-        else:
-            model_name = "AITRADER/MFLUXUI.1-schnell"
-            
-        # Zoek in de Hugging Face cache naar een geschikt model
-        local_model_path = os.path.expanduser(f"~/.cache/huggingface/hub/models--{model_name.replace('/', '--')}/snapshots")
-        
-        if os.path.exists(local_model_path):
-            # Get the most recent snapshot directory
-            snapshot_dirs = [d for d in os.listdir(local_model_path) if os.path.isdir(os.path.join(local_model_path, d))]
-            if snapshot_dirs:
-                # Sort by name to get the most recent snapshot (assuming hash-based naming)
-                snapshot_dir = sorted(snapshot_dirs)[-1]
-                full_path = os.path.join(local_model_path, snapshot_dir)
-                train_cmd.extend(["--path", full_path])
-                yield f"Using local model path: {full_path}\n"
-            else:
-                yield f"No snapshot directories found in {local_model_path}\n"
-        else:
-            yield f"Local model path not found: {local_model_path}\n"
-            yield "Using preloaded models from environment\n"
-        
-        if resume_checkpoint:
-            train_cmd.extend(["--resume-checkpoint", resume_checkpoint])
-
-        yield f"\nStarting training with command:\n{' '.join(train_cmd)}\n\n"
-        
-        process = subprocess.Popen(
-            train_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=1 
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        debug_path.write_text(
+            json.dumps(
+                {
+                    "run_root": str(run_root),
+                    "model": model_name,
+                    "image_size": str(image_size),
+                    "max_resolution": max_resolution,
+                    "uploaded_files": [getattr(f, "name", str(f)) for f in used_files],
+                    "quantize": quantize,
+                    "guidance": guidance,
+                    "steps": steps,
+                    "epochs": _safe_int(epochs, 50),
+                    "batch_size": _safe_int(batch_size, 1),
+                    "learning_rate": _safe_float(learning_rate, 1e-4),
+                    "checkpoint_frequency": _safe_int(checkpoint_frequency, 25),
+                    "low_ram": bool(low_ram_mode),
+                    "transformer_blocks_enabled": bool(transformer_blocks_enabled),
+                    "transformer_start": _safe_int(transformer_start, 0),
+                    "transformer_end": _safe_int(transformer_end, 30),
+                    "single_blocks_enabled": bool(single_blocks_enabled),
+                    "single_start": _safe_int(single_start, 0),
+                    "single_end": _safe_int(single_end, 20),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
-        output_queue = queue.Queue()
-        
-        def enqueue_output(pipe, prefix):
-            for line in iter(pipe.readline, ''):
-                output_queue.put(f"[{prefix}] {line.strip()}\n")
-            pipe.close()
+        yield f"Saved training config: {config_path}\n"
+        yield f"Saved debug config: {debug_path}\n"
 
-        stdout_thread = threading.Thread(target=enqueue_output, args=(process.stdout, 'STDOUT'))
-        stderr_thread = threading.Thread(target=enqueue_output, args=(process.stderr, 'STDERR'))
-        stdout_thread.daemon = True
-        stderr_thread.daemon = True
-        stdout_thread.start()
-        stderr_thread.start()
+        cmd = [sys.executable, "-m", "mflux.models.common.cli.train", "--config", str(config_path)]
+        env = os.environ.copy()
+        env.setdefault("HF_TOKEN", "")
+        env.setdefault("HUGGING_FACE_HUB_TOKEN", "")
 
-        # Buffer voor de output
-        output_buffer = ""
-        last_yield_time = time.time()
-        
-        while process.poll() is None:
-            try:
-                line = output_queue.get_nowait()
-                output_buffer += line
-                
-                # Yield elke seconde of als de buffer groot genoeg is
-                current_time = time.time()
-                if current_time - last_yield_time > 1.0 or len(output_buffer) > 500:
-                    yield output_buffer
-                    output_buffer = ""
-                    last_yield_time = current_time
-                    
-            except queue.Empty:
-                if output_buffer:  # Als er nog iets in de buffer zit
-                    yield output_buffer
-                    output_buffer = ""
-                time.sleep(0.1)  # Voorkom CPU spinning
-                continue
+        yield f"\nStarting training:\n{' '.join(cmd)}\n\n"
+        yield from _run_subprocess_stream(cmd, cwd=str(run_root), env=env)
 
-        # Verzamel overgebleven output
-        remaining_output = []
-        while True:
-            try:
-                line = output_queue.get_nowait()
-                remaining_output.append(line)
-            except queue.Empty:
-                break
+        yield f"\nTraining finished. Outputs: {run_root / 'output'}\n"
 
-        if remaining_output:
-            yield "".join(remaining_output)
+    except Exception as exc:  # noqa: BLE001
+        yield f"Error during training: {exc}\n\n{traceback.format_exc()}"
 
-        if process.returncode != 0:
-            yield f"\n❌ Training process failed with code {process.returncode}\n"
-        else:
-            yield "\n✅ Training completed successfully!\n"
 
-    except Exception as e:
-        error_details = f"Error during training: {str(e)}\n"
-        error_details += f"Full traceback:\n{traceback.format_exc()}"
-        yield error_details
-    finally:
-        if tmpdir and os.path.exists(tmpdir):
-            try:
-                import shutil
-                shutil.rmtree(tmpdir)
-                yield f"\nCleaned up temporary directory: {tmpdir}\n"
-            except Exception as e:
-                yield f"\nWarning: Failed to clean up temporary directory: {str(e)}\n"
+def _run_subprocess_stream(
+    cmd: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict | None = None,
+) -> Iterator[str]:
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
 
-def run_dreambooth_from_ui_no_explicit_quantize(*args, **kwargs):
+    output_queue: "queue.Queue[str]" = queue.Queue()
+
+    def enqueue_output(pipe, prefix: str):
+        for line in iter(pipe.readline, ""):
+            output_queue.put(f"[{prefix}] {line}")
+        pipe.close()
+
+    stdout_thread = threading.Thread(target=enqueue_output, args=(process.stdout, "STDOUT"), daemon=True)
+    stderr_thread = threading.Thread(target=enqueue_output, args=(process.stderr, "STDERR"), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    buffer = ""
+    last_flush = time.time()
+
+    while process.poll() is None:
+        try:
+            chunk = output_queue.get_nowait()
+            buffer += chunk
+            if time.time() - last_flush > 0.5 or len(buffer) > 2000:
+                yield buffer
+                buffer = ""
+                last_flush = time.time()
+        except queue.Empty:
+            if buffer and (time.time() - last_flush > 0.5):
+                yield buffer
+                buffer = ""
+                last_flush = time.time()
+            time.sleep(0.1)
+
+    # Drain remaining output
+    while True:
+        try:
+            buffer += output_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    if buffer:
+        yield buffer
+
+    if process.returncode != 0:
+        yield f"\n❌ Training process exited with code {process.returncode}\n"
+    else:
+        yield "\n✅ Training completed successfully!\n"
+
+
+def run_dreambooth_from_ui_no_explicit_quantize(*args, **kwargs) -> Iterator[str]:
     """
-    Run Dreambooth training from the UI without explicit quantization.
-    This is a wrapper around run_training that handles the UI-specific parameters.
+    Backwards-compatible wrapper: the UI still calls this name.
     """
-    progress_text = ""
-    try:
-        # Frontend argument volgorde:
-        # 0: base_model_dd
-        # 1: uploaded_images
-        # 2: prompt_for_images (trigger_word)
-        # 3: epochs_txt
-        # 4: batch_size_txt
-        # 5: lora_rank_txt
-        # 6: learning_rate_dd
-        # 7: seed_txt
-        # 8: checkpoint_freq_txt
-        # 9: validation_prompt_txt
-        # 10: guidance_scale_slider
-        # 11: low_ram_mode
-        # 12: output_dir_txt
-        # 13: resume_chkpt_txt
-        # 14: mlx_vlm_model
-        # 15: transformer_blocks_enabled
-        # 16: transformer_start
-        # 17: transformer_end
-        # 18: single_blocks_enabled
-        # 19: single_start
-        # 20: single_end
-        # 21: image_size
-        # 22+: captions
+    yield from run_training(*args, **kwargs)
 
-        # Save debug config first to ensure it's always saved
-        debug_config = {
-            "base_model": args[0],
-            "trigger_word": args[2],
-            "epochs": args[3],
-            "batch_size": args[4],
-            "lora_rank": args[5],
-            "learning_rate": args[6],
-            "seed": args[7],
-            "checkpoint_frequency": args[8],
-            "validation_prompt": args[9],
-            "guidance_scale": args[10],
-            "low_ram_mode": args[11],
-            "output_dir": args[12],
-            "resume_checkpoint": args[13],
-            "transformer_blocks_enabled": args[15],
-            "transformer_start": args[16], 
-            "transformer_end": args[17],
-            "single_blocks_enabled": args[18],
-            "single_start": args[19],
-            "single_end": args[20],
-            "image_size": args[21],
-            "captions": list(args[22:]),
-            "uploaded_files": [f.name for f in args[1]]
-        }
-        
-        debug_path = os.path.join(configs_dir, "dreambooth_debug_config.json")
-        os.makedirs(configs_dir, exist_ok=True)
-        
-        with open(debug_path, "w") as f:
-            json.dump(debug_config, f, indent=2)
-        
-        progress_text += f"[DEBUG] Saved debug config to: {debug_path}\n"
-        
-        # Herordenen van de argumenten voor de run_training functie
-        # run_training verwacht: base_model, uploaded_files, trigger_word, epochs, batch_size, lora_rank, 
-        # output_dir, resume_checkpoint, mlx_vlm_model, transformer_blocks_enabled, transformer_start, 
-        # transformer_end, single_blocks_enabled, single_start, single_end, image_size, learning_rate,
-        # seed, checkpoint_frequency, validation_prompt, guidance_scale, low_ram_mode, *captions
-        new_args = [
-            args[0],  # base_model
-            args[1],  # uploaded_files
-            args[2],  # trigger_word
-            args[3],  # epochs
-            args[4],  # batch_size
-            args[5],  # lora_rank
-            args[12], # output_dir
-            args[13], # resume_checkpoint
-            args[14], # mlx_vlm_model
-            args[15], # transformer_blocks_enabled
-            args[16], # transformer_start
-            args[17], # transformer_end
-            args[18], # single_blocks_enabled
-            args[19], # single_start
-            args[20], # single_end
-            args[21], # image_size
-            args[6],  # learning_rate
-            args[7],  # seed
-            args[8],  # checkpoint_frequency
-            args[9],  # validation_prompt
-            args[10], # guidance_scale
-            args[11], # low_ram_mode
-        ]
-        
-        # Voeg de resterende argumenten (captions) toe
-        new_args.extend(args[22:])
-        
-        # Nu run de training proces met de juiste volgorde
-        for progress in run_training(*new_args, **kwargs):
-            progress_text += progress
-            yield progress_text
-    except Exception as e:
-        error_text = f"Error during training: {str(e)}\n"
-        error_text += f"Full traceback:\n{traceback.format_exc()}"
-        yield error_text

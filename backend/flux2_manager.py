@@ -62,6 +62,7 @@ def generate_flux2_image_gradio(
     width: int,
     height: int,
     steps: int,
+    guidance: float | None,
     lora_files,
     lora_scales,
     metadata: bool,
@@ -76,6 +77,7 @@ def generate_flux2_image_gradio(
 
     model_name = model_name or "flux2-klein-4b"
     resolved_name = strip_quant_suffix(model_name)
+    is_base = "-base-" in (resolved_name or "").lower()
     model_config = resolve_mflux_model_config(resolved_name, None)
     local_dir = resolve_local_path(resolved_name)
     quantize = _resolve_quantize(model_name)
@@ -90,9 +92,17 @@ def generate_flux2_image_gradio(
     )
 
     try:
-        steps_int = int(steps) if steps else 4
+        default_steps = 50 if is_base else 4
+        steps_int = int(steps) if steps else default_steps
     except (TypeError, ValueError):
-        steps_int = 4
+        steps_int = 50 if is_base else 4
+
+    try:
+        guidance_val = float(guidance) if guidance not in (None, "", "None") else 1.0
+    except (TypeError, ValueError):
+        guidance_val = 1.0
+    if not is_base:
+        guidance_val = 1.0
 
     try:
         total_images = max(1, int(num_images))
@@ -111,7 +121,7 @@ def generate_flux2_image_gradio(
             num_inference_steps=steps_int,
             height=height,
             width=width,
-            guidance=1.0,
+            guidance=guidance_val,
         )
         filename = f"flux2_{int(time.time())}_{current_seed}.png"
         output_path = OUTPUT_DIR / filename
@@ -131,6 +141,7 @@ def generate_flux2_edit_gradio(
     width: int,
     height: int,
     steps: int,
+    guidance: float | None,
     lora_files,
     lora_scales,
     metadata: bool,
@@ -145,6 +156,7 @@ def generate_flux2_edit_gradio(
 
     model_name = model_name or "flux2-klein-4b"
     resolved_name = strip_quant_suffix(model_name)
+    is_base = "-base-" in (resolved_name or "").lower()
     model_config = resolve_mflux_model_config(resolved_name, None)
     local_dir = resolve_local_path(resolved_name)
     quantize = _resolve_quantize(model_name)
@@ -159,9 +171,17 @@ def generate_flux2_edit_gradio(
     )
 
     try:
-        steps_int = int(steps) if steps else 4
+        default_steps = 50 if is_base else 4
+        steps_int = int(steps) if steps else default_steps
     except (TypeError, ValueError):
-        steps_int = 4
+        steps_int = 50 if is_base else 4
+
+    try:
+        guidance_val = float(guidance) if guidance not in (None, "", "None") else 1.0
+    except (TypeError, ValueError):
+        guidance_val = 1.0
+    if not is_base:
+        guidance_val = 1.0
 
     try:
         total_images = max(1, int(num_images))
@@ -181,7 +201,7 @@ def generate_flux2_edit_gradio(
             num_inference_steps=steps_int,
             height=height,
             width=width,
-            guidance=1.0,
+            guidance=guidance_val,
             image_paths=normalized_paths,
         )
         filename = f"flux2_edit_{int(time.time())}_{current_seed}.png"

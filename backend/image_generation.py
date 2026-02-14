@@ -19,9 +19,17 @@ def update_guidance_visibility(model):
     Voorbeeld: Guidance visible maken indien 'dev' in de modelnaam zit.
     """
     if is_flux2_model_name(model):
+        model_name = (model or "").lower()
+        if "-base-" in model_name:
+            return gr.update(
+                visible=True,
+                label="Guidance Scale (FLUX.2 base models)",
+                value=1.0,
+                interactive=True,
+            )
         return gr.update(
             visible=True,
-            label="Guidance Scale (fixed at 1.0 for FLUX.2)",
+            label="Guidance Scale (fixed at 1.0 for FLUX.2 distilled)",
             value=1.0,
             interactive=False,
         )

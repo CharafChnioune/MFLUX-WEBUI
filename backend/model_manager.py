@@ -60,6 +60,8 @@ def _register_default_models():
         ("flux2-klein-9b", "black-forest-labs/FLUX.2-klein-9B", 512, "flux2"),
         ("flux2-klein-9b-mlx-4bit", "AITRADER/FLUX2-klein-9B-mlx-4bit", 512, "flux2"),
         ("flux2-klein-9b-mlx-8bit", "AITRADER/FLUX2-klein-9B-mlx-8bit", 512, "flux2"),
+        ("flux2-klein-base-4b", "black-forest-labs/FLUX.2-klein-base-4B", 512, "flux2"),
+        ("flux2-klein-base-9b", "black-forest-labs/FLUX.2-klein-base-9B", 512, "flux2"),
         ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
     for alias, repo, seq_len, base_arch in official:
@@ -108,6 +110,16 @@ def _flux2_ordered() -> List[str]:
         "flux2-klein-9b-4-bit",
         "flux2-klein-9b-6-bit",
         "flux2-klein-9b-8-bit",
+        "flux2-klein-base-4b",
+        "flux2-klein-base-4b-3-bit",
+        "flux2-klein-base-4b-4-bit",
+        "flux2-klein-base-4b-6-bit",
+        "flux2-klein-base-4b-8-bit",
+        "flux2-klein-base-9b",
+        "flux2-klein-base-9b-3-bit",
+        "flux2-klein-base-9b-4-bit",
+        "flux2-klein-base-9b-6-bit",
+        "flux2-klein-base-9b-8-bit",
     ]
 
 
@@ -222,6 +234,8 @@ def resolve_mflux_model_config(model_name: str, base_model: Optional[str] = None
             "flux2-klein": "flux2_klein_4b",
             "flux2-klein-4b": "flux2_klein_4b",
             "flux2-klein-9b": "flux2_klein_9b",
+            "flux2-klein-base-4b": "flux2_klein_base_4b",
+            "flux2-klein-base-9b": "flux2_klein_base_9b",
             "klein-4b": "flux2_klein_4b",
             "klein-9b": "flux2_klein_9b",
             "dev-kontext": "dev_kontext",
@@ -235,6 +249,7 @@ def resolve_mflux_model_config(model_name: str, base_model: Optional[str] = None
             "qwen-image": "qwen_image",
             "qwen-image-edit": "qwen_image_edit",
             "fibo": "fibo",
+            "z-image": "z_image",
             "z-image-turbo": "z_image_turbo",
         }
         method = method_map.get(resolved_name)
@@ -340,6 +355,13 @@ def update_guidance_visibility(model):
     """
     model_name = (model or "").lower()
     if model_name.startswith(("flux2-", "klein-")):
+        if "-base-" in model_name:
+            return gr.update(
+                visible=True,
+                label="Guidance Scale (FLUX.2 base models)",
+                value=1.0,
+                interactive=True,
+            )
         return gr.update(
             visible=True,
             label="Guidance Scale (fixed at 1.0 for FLUX.2)",
