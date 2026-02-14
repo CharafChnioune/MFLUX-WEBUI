@@ -52,6 +52,10 @@ def is_flux2_model_name(model_name: str) -> bool:
     normalized = strip_quant_suffix(model_name or "").lower()
     return normalized.startswith(("flux2-", "klein-")) or normalized == "flux2-klein"
 
+def is_flux2_base_model_name(model_name: str) -> bool:
+    normalized = strip_quant_suffix(model_name or "").lower()
+    return normalized.startswith(("flux2-", "klein-")) and "-base-" in normalized
+
 
 def save_image_with_metadata(pil_image, output_path: str, metadata: dict):
     """
@@ -273,9 +277,17 @@ def generate_image_batch(flux, prompt, seed, steps, height, width, guidance, num
     seeds_used = []
     
     flux2_model = is_flux2_model_name(model_name or "") or flux.__class__.__name__.lower().startswith("flux2")
-    if flux2_model and guidance != 1.0:
-        print("FLUX.2 requires guidance=1.0; overriding guidance.")
-        guidance = 1.0
+    if flux2_model:
+        # Distilled FLUX.2 Klein models use guidance=1.0; base models allow guidance > 1.0.
+        is_base = is_flux2_base_model_name(model_name or "")
+        if not is_base:
+            cfg = getattr(flux, "model_config", None)
+            cfg_name = getattr(cfg, "model_name", "") if cfg is not None else ""
+            is_base = "-base-" in str(cfg_name).lower()
+
+        if not is_base and guidance != 1.0:
+            print("FLUX.2 (distilled) uses guidance=1.0; overriding guidance.")
+            guidance = 1.0
 
     for i in range(num_images):
         current_seed = seed if seed is not None else int(time.time()) + i
@@ -694,9 +706,10 @@ def generate_image_gradio(
                     guidance_value = float(guidance)
 
                 if is_flux2_model_name(model):
-                    if guidance_value != 1.0:
-                        print("FLUX.2 requires guidance=1.0; overriding guidance.")
-                    guidance_value = 1.0
+                    if not is_flux2_base_model_name(model):
+                        if guidance_value != 1.0:
+                            print("FLUX.2 (distilled) uses guidance=1.0; overriding guidance.")
+                        guidance_value = 1.0
                 
                 steps_int = 4 if not steps or steps.strip() == "" else int(steps)
                 

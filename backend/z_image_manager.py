@@ -7,9 +7,20 @@ from typing import List, Optional
 import gradio as gr
 from PIL import Image
 
+from backend.mflux_compat import ModelConfig
 from backend.lora_manager import process_lora_files
 
-from mflux.models.z_image.variants.turbo.z_image_turbo import ZImageTurbo
+try:
+    # MFLUX >= 0.16: ZImageTurbo is an alias of ZImage.
+    from mflux.models.z_image import ZImage
+except ModuleNotFoundError:  # pragma: no cover - legacy fallback
+    ZImage = None  # type: ignore
+    try:
+        from mflux.models.z_image.variants.turbo.z_image_turbo import ZImageTurbo as _LegacyZImageTurbo  # type: ignore
+    except ModuleNotFoundError:
+        _LegacyZImageTurbo = None  # type: ignore
+else:
+    _LegacyZImageTurbo = None  # type: ignore
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,6 +64,17 @@ def _parse_quantize(value) -> Optional[int]:
         return None
     return int(value)
 
+def _normalize_variant(value: Optional[str]) -> str:
+    if not value:
+        return "z-image-turbo"
+    return str(value).strip().lower()
+
+def _variant_model_config(variant: str):
+    # Keep this mapping in one place to make UI/backend consistent.
+    if variant in {"z-image", "zimage"}:
+        return ModelConfig.z_image()
+    return ModelConfig.z_image_turbo()
+
 
 def generate_z_image_gradio(
     prompt: str,
@@ -69,6 +91,9 @@ def generate_z_image_gradio(
     init_image,
     image_strength: float,
     num_images: int = 1,
+    variant: str = "z-image-turbo",
+    guidance: float | None = None,
+    negative_prompt: str | None = None,
     progress: gr.Progress = gr.Progress(track_tqdm=True),
 ):
     if not prompt:
@@ -76,20 +101,41 @@ def generate_z_image_gradio(
 
     try:
         quant_value = _parse_quantize(quantize_bits)
+        variant_norm = _normalize_variant(variant)
+        model_config = _variant_model_config(variant_norm)
+
         lora_paths = process_lora_files(lora_files) if lora_files else None
         lora_scales_float = process_lora_files(lora_files, lora_scales) if lora_paths else None
 
-        model = ZImageTurbo(
-            quantize=quant_value,
-            model_path=model_path or None,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales_float,
-        )
+        if ZImage is None and _LegacyZImageTurbo is None:
+            return [], "Z-Image is unavailable. Install/upgrade mflux.", prompt
+
+        ModelClass = ZImage if ZImage is not None else _LegacyZImageTurbo
+        try:
+            model = ModelClass(
+                quantize=quant_value,
+                model_path=model_path or None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+                model_config=model_config,
+            )
+        except TypeError:
+            # Older MFLUX used local_path instead of model_path and didn't always accept model_config.
+            model = ModelClass(
+                quantize=quant_value,
+                local_path=model_path or None,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales_float,
+            )
 
         init_image_path = _ensure_image_path(init_image, "z_image_init")
         seeds = _prepare_seeds(seed, int(num_images) if num_images else 1)
         generated_images: List[Image.Image] = []
         info_lines: List[str] = []
+
+        is_turbo = variant_norm in {"z-image-turbo", "zimage-turbo"}
+        guidance_value = 0.0 if is_turbo else guidance
+        default_scheduler = "linear" if is_turbo else "flow_match_euler_discrete"
 
         for idx, current_seed in enumerate(seeds, start=1):
             progress((idx - 1) / len(seeds), desc=f"Generating {idx}/{len(seeds)}")
@@ -101,9 +147,12 @@ def generate_z_image_gradio(
                 width=int(width),
                 image_path=init_image_path,
                 image_strength=image_strength if image_strength not in (None, "", 0, "0") else None,
-                scheduler=scheduler or "linear",
+                scheduler=scheduler or default_scheduler,
+                guidance=guidance_value,
+                negative_prompt=negative_prompt,
             )
-            filename = f"z_image_{int(time.time())}_{current_seed}.png"
+            prefix = "z_image_turbo" if variant_norm in {"z-image-turbo", "zimage-turbo"} else "z_image"
+            filename = f"{prefix}_{int(time.time())}_{current_seed}.png"
             output_path = OUTPUT_DIR / filename
             result.save(path=output_path, export_json_metadata=metadata)
             generated_images.append(result.image)

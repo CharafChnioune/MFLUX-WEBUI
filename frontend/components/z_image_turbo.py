@@ -10,20 +10,32 @@ from backend.lora_manager import (
 
 
 def create_z_image_turbo_tab():
-    with gr.TabItem("Z-Image Turbo"):
+    with gr.TabItem("Z-Image"):
         gr.Markdown(
             """
-            # Z-Image Turbo
-            Fast text-to-image generation with the Z-Image Turbo model. Guidance is fixed to 0.
+            # Z-Image
+            Z-Image supports both **Turbo** (fast, guidance fixed to 0) and **Base** (slower, supports guidance + negative prompt).
             """
         )
 
         with gr.Row():
             with gr.Column(scale=1):
+                variant = gr.Dropdown(
+                    label="Variant",
+                    choices=["z-image-turbo", "z-image"],
+                    value="z-image-turbo",
+                )
+
                 prompt = gr.Textbox(
                     label="Prompt",
                     placeholder="Describe the scene...",
                     lines=3,
+                )
+                negative_prompt = gr.Textbox(
+                    label="Negative Prompt (Base only)",
+                    placeholder="Optional (used when guidance > 1.0)",
+                    lines=2,
+                    visible=False,
                 )
                 init_image = gr.Image(
                     label="Init Image (optional)",
@@ -40,7 +52,7 @@ def create_z_image_turbo_tab():
 
                 model_path = gr.Textbox(
                     label="Model Path or HF Repo (optional)",
-                    placeholder="e.g. filipstrand/Z-Image-Turbo-mflux-4bit",
+                    placeholder="Turbo: filipstrand/Z-Image-Turbo-mflux-4bit  |  Base: Tongyi-MAI/Z-Image",
                 )
                 quantize_bits = gr.Dropdown(
                     label="Quantization",
@@ -53,6 +65,14 @@ def create_z_image_turbo_tab():
                     height = gr.Number(label="Height", value=1024, precision=0)
 
                 steps = gr.Slider(1, 20, value=9, step=1, label="Steps")
+                guidance = gr.Slider(
+                    minimum=0.0,
+                    maximum=10.0,
+                    value=0.0,
+                    step=0.1,
+                    label="Guidance (Base only)",
+                    visible=False,
+                )
 
                 scheduler = gr.Dropdown(
                     label="Scheduler",
@@ -112,15 +132,40 @@ def create_z_image_turbo_tab():
                 )
                 status = gr.Textbox(label="Status", interactive=False)
 
+        def _update_variant_controls(variant_val: str):
+            v = (variant_val or "").strip().lower()
+            if v in {"z-image", "zimage"}:
+                return (
+                    gr.update(visible=True),
+                    gr.update(visible=True, value=4.0),
+                    gr.update(maximum=80, value=50),
+                    gr.update(value="flow_match_euler_discrete"),
+                )
+            return (
+                gr.update(visible=False, value=""),
+                gr.update(visible=False, value=0.0),
+                gr.update(maximum=20, value=9),
+                gr.update(value="linear"),
+            )
+
+        variant.change(
+            fn=_update_variant_controls,
+            inputs=[variant],
+            outputs=[negative_prompt, guidance, steps, scheduler],
+        )
+
         def _run_z_image(*args):
             (
+                variant_val,
                 prompt_val,
+                negative_prompt_val,
                 model_path_val,
                 quantize_val,
                 seed_val,
                 width_val,
                 height_val,
                 steps_val,
+                guidance_val,
                 scheduler_val,
                 lora_files_val,
                 metadata_val,
@@ -147,18 +192,24 @@ def create_z_image_turbo_tab():
                 init_image=init_image_val,
                 image_strength=image_strength_val,
                 num_images=int(num_images_val) if num_images_val else 1,
+                variant=variant_val,
+                guidance=guidance_val,
+                negative_prompt=negative_prompt_val,
             )
 
         generate_btn.click(
             fn=_run_z_image,
             inputs=[
+                variant,
                 prompt,
+                negative_prompt,
                 model_path,
                 quantize_bits,
                 seed,
                 width,
                 height,
                 steps,
+                guidance,
                 scheduler,
                 lora_files,
                 metadata,

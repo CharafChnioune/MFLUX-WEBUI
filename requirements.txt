@@ -1,16 +1,15 @@
-mflux>=0.15.4
+mflux>=0.16.3
 mlx>=0.30.3,<0.31.0
 gradio>=6.2.0
 ollama>=0.5.1
 requests>=2.32.5
 beautifulsoup4==4.13.4
 mlx-vlm==0.3.9
-mlx-lm==0.30.2
+mlx-lm==0.30.7
 peft==0.15.2
 psutil>=5.9.0          
 pyyaml>=6.0            
-pillow>=10.4.0,<11.0; python_version < "3.13"
-pillow>=11.0.0,<12.0; python_version >= "3.13"
+pillow>=12.1.1
 numpy>=2.0.1,<3.0      
 pathlib2>=2.3.7        
 json5>=0.9.14          
@@ -18,7 +17,7 @@ opencv-python>=4.10.0
 scipy>=1.11.0          
 matplotlib>=3.7.0       
 tqdm>=4.65.0
-transformers==5.0.0rc1
+transformers>=5.0.0,<6.0
 piexif>=1.1.3
 black>=23.0.0       
 flake8>=6.0.0         

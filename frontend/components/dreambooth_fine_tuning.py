@@ -1,5 +1,4 @@
 import gradio as gr
-from backend.model_manager import get_updated_models
 from backend.captions import (
     show_uploaded_images,
     fill_captions
@@ -11,8 +10,8 @@ def create_dreambooth_fine_tuning_tab():
     """Create the Dreambooth Fine-Tuning tab interface"""
     gr.Markdown(
         """
-        ### Dreambooth Fine-Tuning
-        Train your own LoRA model by uploading images and setting parameters.
+        ### LoRA Training (mflux-train)
+        MFLUX v0.16+ uses a rewritten training stack. This tab prepares a dataset and runs `mflux-train`.
         """
     )
     
@@ -25,9 +24,14 @@ def create_dreambooth_fine_tuning_tab():
             )
             
             base_model_dd = gr.Dropdown(
-                choices=get_updated_models(),
-                value="schnell-4-bit",
-                label="Base Model",
+                choices=[
+                    "z-image-turbo",
+                    "z-image",
+                    "flux2-klein-base-4b",
+                    "flux2-klein-base-9b",
+                ],
+                value="z-image-turbo",
+                label="Training Model",
                 allow_custom_value=True
             )
             
@@ -226,11 +230,18 @@ def create_dreambooth_fine_tuning_tab():
                 
                 guidance_scale_slider = gr.Slider(
                     label="Guidance Scale",
-                    minimum=1.0,
+                    minimum=0.0,
                     maximum=10.0,
-                    value=3.0,
+                    value=0.0,
                     step=0.1,
-                    info="Controls how closely the model follows the prompt (higher = more prompt adherence)"
+                    info="Turbo uses 0.0; base models can use > 1.0"
+                )
+
+                quantize_bits = gr.Dropdown(
+                    label="Quantization (optional)",
+                    choices=["None", "8", "6", "5", "4", "3"],
+                    value="8",
+                    info="Training can run without quantization, but memory use will be higher."
                 )
                 
                 low_ram_mode = gr.Checkbox(
@@ -259,11 +270,9 @@ def create_dreambooth_fine_tuning_tab():
             Control which parts of the model to train. More layers = better results but slower training.
             """)
 
-            with gr.Accordion("🔄 Transformer Blocks (Early Layers)", open=False):
+            with gr.Accordion("🔄 Transformer Blocks", open=False):
                 gr.Markdown("""
-                Early network layers (0-19) that have more impact but are slower to train.
-                Training these requires more memory but can give better results.
-                Enable only if you have enough memory and want better results.
+                Z-Image targets `layers.{block}.*`. FLUX.2 targets `transformer_blocks.{block}.*`.
                 """)
                 transformer_blocks_enabled = gr.Checkbox(
                     label="Enable Transformer Blocks",
@@ -272,22 +281,21 @@ def create_dreambooth_fine_tuning_tab():
                 transformer_start = gr.Slider(
                     label="Start Block",
                     minimum=0,
-                    maximum=19,
+                    maximum=30,
                     value=0,
                     step=1
                 )
                 transformer_end = gr.Slider(
-                    label="End Block",
+                    label="End Block (exclusive)",
                     minimum=0,
-                    maximum=19,
-                    value=19,
+                    maximum=30,
+                    value=30,
                     step=1
                 )
 
-            with gr.Accordion("🔄 Single Transformer Blocks (Late Layers)", open=False):
+            with gr.Accordion("🔄 Single Transformer Blocks", open=False):
                 gr.Markdown("""
-                Later network layers (0-38) that are faster to train and use less memory.
-                Recommended for most training runs.
+                FLUX.2 only: targets `single_transformer_blocks.{block}.*`.
                 """)
                 single_blocks_enabled = gr.Checkbox(
                     label="Enable Single Transformer Blocks",
@@ -296,42 +304,55 @@ def create_dreambooth_fine_tuning_tab():
                 single_start = gr.Slider(
                     label="Start Block",
                     minimum=0,
-                    maximum=38,
+                    maximum=24,
                     value=0,
                     step=1
                 )
                 single_end = gr.Slider(
-                    label="End Block",
+                    label="End Block (exclusive)",
                     minimum=0,
-                    maximum=38,
-                    value=38,
+                    maximum=24,
+                    value=20,
                     step=1
                 )
 
-                # Add event handlers to ensure only one type is enabled at a time
-                def update_blocks_visibility(transformer_enabled, single_enabled):
-                    if transformer_enabled and single_enabled:
-                        # If both are enabled, disable the one that wasn't just clicked
-                        return {
-                            transformer_blocks_enabled: True,
-                            single_blocks_enabled: False
-                        }
-                    return {
-                        transformer_blocks_enabled: transformer_enabled,
-                        single_blocks_enabled: single_enabled
-                    }
-
-                transformer_blocks_enabled.change(
-                    fn=update_blocks_visibility,
-                    inputs=[transformer_blocks_enabled, single_blocks_enabled],
-                    outputs=[transformer_blocks_enabled, single_blocks_enabled]
+            def _update_training_defaults(model_val: str):
+                m = (model_val or "").strip().lower()
+                if m in {"z-image-turbo", "zimage-turbo"}:
+                    return (
+                        gr.update(value=0.0, interactive=False),
+                        gr.update(maximum=30, value=30),
+                        gr.update(value=False),
+                    )
+                if m in {"z-image", "zimage"}:
+                    return (
+                        gr.update(value=4.0, interactive=True),
+                        gr.update(maximum=30, value=30),
+                        gr.update(value=False),
+                    )
+                if m == "flux2-klein-base-4b":
+                    return (
+                        gr.update(value=1.0, interactive=True),
+                        gr.update(maximum=5, value=5),
+                        gr.update(value=True),
+                    )
+                if m == "flux2-klein-base-9b":
+                    return (
+                        gr.update(value=1.0, interactive=True),
+                        gr.update(maximum=8, value=8),
+                        gr.update(value=True),
+                    )
+                return (
+                    gr.update(value=1.0, interactive=True),
+                    gr.update(),
+                    gr.update(),
                 )
 
-                single_blocks_enabled.change(
-                    fn=update_blocks_visibility,
-                    inputs=[transformer_blocks_enabled, single_blocks_enabled],
-                    outputs=[transformer_blocks_enabled, single_blocks_enabled]
-                )
+            base_model_dd.change(
+                fn=_update_training_defaults,
+                inputs=[base_model_dd],
+                outputs=[guidance_scale_slider, transformer_end, single_blocks_enabled],
+            )
 
     with gr.Row():
         with gr.Column(scale=1):
@@ -345,7 +366,7 @@ def create_dreambooth_fine_tuning_tab():
 
     debug_dir = gr.Textbox(
         label="Debug Config Location", 
-        value=os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "dreambooth_debug_config.json"),
+        value=os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "train_debug.json"),
         interactive=False
     )
 
@@ -379,10 +400,10 @@ def create_dreambooth_fine_tuning_tab():
             checkpoint_freq_txt,
             validation_prompt_txt,
             guidance_scale_slider,
+            quantize_bits,
             low_ram_mode,
             output_dir_txt,
             resume_chkpt_txt,
-            mlx_vlm_model,
             transformer_blocks_enabled,
             transformer_start,
             transformer_end,

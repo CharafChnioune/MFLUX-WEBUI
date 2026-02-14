@@ -9,7 +9,8 @@ def create_flux2_generate_tab():
     with gr.TabItem("Flux2 Klein"):
         gr.Markdown(
             "### ⚡ Flux2 Klein (Text-to-Image)\n"
-            "FLUX.2 uses guidance=1.0 (fixed) and is optimized for fast 4-step generation."
+            "Distilled FLUX.2 Klein models are optimized for fast 4-step generation (guidance fixed at 1.0).\n"
+            "Base FLUX.2 Klein models are slower and allow guidance > 1.0 (useful for training)."
         )
 
         prompt = gr.Textbox(label="Prompt", lines=3)
@@ -28,10 +29,30 @@ def create_flux2_generate_tab():
             height = gr.Slider(512, 2048, value=1024, step=64, label="Height")
 
         steps = gr.Slider(1, 12, value=4, step=1, label="Inference Steps")
-        guidance = gr.Number(label="Guidance Scale", value=1.0, interactive=False)
+        guidance = gr.Slider(1.0, 5.0, value=1.0, step=0.1, label="Guidance Scale", interactive=False)
 
         seed = gr.Textbox(label="Seed", placeholder="Leave blank for random")
         num_images = gr.Slider(1, 4, value=1, step=1, label="Number of Images")
+
+        def _is_base_model(name: str) -> bool:
+            return "-base-" in (name or "").lower()
+
+        def _update_flux2_controls(model_val: str):
+            if _is_base_model(model_val):
+                return (
+                    gr.update(maximum=80, value=50),
+                    gr.update(interactive=True, value=1.5),
+                )
+            return (
+                gr.update(maximum=12, value=4),
+                gr.update(interactive=False, value=1.0),
+            )
+
+        model.change(
+            fn=_update_flux2_controls,
+            inputs=[model],
+            outputs=[steps, guidance],
+        )
 
         with gr.Accordion("LoRA Settings", open=False):
             lora_files = gr.Dropdown(
@@ -69,6 +90,7 @@ def create_flux2_generate_tab():
             width_val,
             height_val,
             steps_val,
+            guidance_val,
             lora_files_val,
             *scale_and_meta,
         ):
@@ -86,6 +108,7 @@ def create_flux2_generate_tab():
                 int(width_val),
                 int(height_val),
                 int(steps_val),
+                guidance_val,
                 lora_files_val,
                 scale_vals,
                 metadata_val,
@@ -102,6 +125,7 @@ def create_flux2_generate_tab():
                 width,
                 height,
                 steps,
+                guidance,
                 lora_files,
                 *lora_scale_sliders,
                 metadata,

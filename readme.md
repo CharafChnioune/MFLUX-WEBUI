@@ -1,4 +1,4 @@
-# MFLUX WebUI v0.15.4
+# MFLUX WebUI v0.16.3
 
 ![MFLUX WebUI Logo](logo.png)
 
@@ -7,11 +7,11 @@ A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now wit
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-[![MFLUX](https://img.shields.io/badge/MFLUX-v0.15.4-green)](https://github.com/filipstrand/mflux)
+[![MFLUX](https://img.shields.io/badge/MFLUX-v0.16.3-green)](https://github.com/filipstrand/mflux)
 
 ## Introduction
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.15.x** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
+MFLUX WebUI is a comprehensive interface for the **mflux 0.16.x** image generation library. It provides an intuitive way to interact with mflux models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
 
 ## Features
 
@@ -20,23 +20,26 @@ MFLUX WebUI is a comprehensive interface for the **MFLUX 0.15.x** image generati
 - 🎨 **Image-to-Image** transformation
 - 🖌️ **Fill Tool (Inpaint/Outpaint)**
 - 🌊 **Depth Tool** with depth-guided generation
-- ⚡ **Flux2 Klein** text-to-image + multi-image edit
+- ⚡ **FLUX.2 Klein** text-to-image + multi-image edit (distilled + base)
 - **Qwen Image & Qwen Edit** for multilingual generation + edits
 - **FIBO** structured prompt generation
-- **Z-Image Turbo** fast text-to-image
+- **Z-Image** fast text-to-image (Turbo + Base variants)
 - 🔁 **Redux** image variation generator
 - ⬆️ **Upscale** high-resolution upscaling (ControlNet-aware)
 - 👕 **CatVTON** virtual try-on
 - ✏️ **IC-Edit** in-context editing
 - 🧩 **Concept Attention** fine-grained prompt control
 - 🎛️ ControlNet support
-- 🎯 **Dreambooth Fine-Tuning**
+- 🎯 **LoRA Training (mflux-train)**
 
-### New v0.15.4 Highlights
-- **Flux2 Klein (4B/9B)** support with dedicated generate + edit tabs (guidance fixed at 1.0)
+### New v0.16.3 Highlights
+- Updated to **mflux 0.16.3**
+- **FLUX.2 Klein** supports both distilled and base variants (base exposes guidance; distilled guidance stays fixed at 1.0)
+- **Z-Image** tab supports both `z-image-turbo` (fast, guidance fixed to 0) and `z-image` base (guidance + negative prompt)
 - **SeedVR2 Upscale** tab integration with softness control for faithful 1-step upscaling
 - **FIBO** tab with JSON prompts + optional VLM expansion
-- **Z-Image Turbo** tab with LoRA + img2img support
+- **Z-Image (Turbo + Base)** tab with LoRA + img2img support
+- **LoRA Training** updated to the new `mflux-train` pipeline (mflux >= 0.16)
 - 🎲 **Dynamic Prompts** - Wildcard support and prompt variations (applied across all generation workflows)
 - 🎯 **Auto Seeds** - Intelligent seed management and selection (shared workflow for Easy, Advanced, Canvas, ControlNet, Image-to-Image, In-Context LoRA)
 - ⚙️ **Configuration Manager** - Advanced config handling with presets
@@ -163,9 +166,9 @@ The built-in API mirrors SD WebUI-style endpoints for automation.
 
 Run only the API (skip UI) by importing and calling `backend.api_server.run_server(host, port)` in your own launcher if needed.
 
-### v0.13.3 Configuration
+### Configuration
 
-After installation, you may want to configure the new v0.13.3 features:
+After installation, you may want to configure optional features:
 
 #### Environment Variables
 
@@ -197,14 +200,14 @@ pip install black flake8 pytest
 
 ### Interface Overview
 
-The MFLUX WebUI v0.13.3 contains the following tabs:
+The MFLUX WebUI contains the following tabs:
 
 #### Core Generation Tabs
 1. **MFLUX Easy** – quick text-to-image generation  
 2. **Qwen Image** – text-to-image generation with the Qwen Image model (multilingual prompts, negative prompts, LoRA, quantization and optional init image)  
 3. **Qwen Image Edit** – image editing based on one or more reference images using Qwen-Image-Edit (semantic + appearance editing)  
 4. **FIBO** – structured prompt-based generation  
-5. **Z-Image Turbo** – fast text-to-image generation  
+5. **Z-Image** – fast text-to-image generation (Turbo + Base)  
 6. **🎨 Canvas** – node-like workflow canvas for chaining tools  
 7. **Advanced Generate** – full control over generation parameters  
 8. **ControlNet** – guided generation with control images  
@@ -221,7 +224,7 @@ The MFLUX WebUI v0.13.3 contains the following tabs:
 19. **Kontext** – context-aware generation  
 20. **Model & LoRA Management** – download, quantize & manage models
 
-#### New v0.13.3 Management & Workflow Tabs
+#### Management & Workflow Tabs
 21. **Auto Seeds** – intelligent seed management and auto-generation (global workflow for all generation tabs)
 22. **Dynamic Prompts** – wildcard prompts, categories, and variations (applied in Easy, Advanced, Canvas, ControlNet, Image-to-Image and In-Context LoRA)
 23. **Configuration** – advanced config management with presets
@@ -286,12 +289,12 @@ The Image-to-Image tab allows you to transform existing images using new prompts
 - **LoRA Scale**: Adjust the influence of the LoRA files.
 - **Export Metadata**: Option to export generation parameters as JSON.
 
-## New v0.13.3 Features
+## Additional Features
 
 ### New Model Tabs
 
 - **FIBO**: JSON-native prompting with optional VLM expansion for structured prompts.
-- **Z-Image Turbo**: fast generation in ~9 steps with LoRA and img2img support.
+- **Z-Image**: Turbo (fast, guidance fixed at 0) and Base (slower, supports guidance + negative prompt), with LoRA + img2img support.
 
 ### Auto Seeds Management
 
@@ -349,7 +352,7 @@ The Configuration Manager tab offers comprehensive settings control:
 
 ### Enhanced Generation Workflow
 
-v0.13.3 introduces a comprehensive generation workflow system:
+This WebUI includes a comprehensive generation workflow system:
 
 - **Pre-generation Checks**: Validate settings before starting
 - **Progress Monitoring**: Real-time generation progress tracking
@@ -490,14 +493,14 @@ This tag introduces a richer Qwen workflow on top of the existing MFLUX WebUI:
 
 These enhancements sit on top of the standard MFLUX Qwen integration and do not change the underlying Qwen models; they add a more powerful and user-friendly workflow layer around Qwen-Image and Qwen-Image-Edit.
 
-### v0.13.3 (Latest)
+### v0.16.3 (Latest)
 
 **Highlights:**
-- Updated to MFLUX v0.13.3 (FIBO + Z-Image Turbo support)
-- Added FIBO and Z-Image Turbo tabs
-- Refreshed ControlNet/Depth/Upscale integrations for the latest MFLUX APIs
+- Updated to mflux v0.16.3 (Z-Image Base + FLUX.2 base + new training stack)
+- Added/updated Z-Image (Turbo + Base) and FLUX.2 Klein base model support
+- Updated LoRA trainer to the new `mflux-train` pipeline
 - Improved API model selection for Open WebUI clients
-- Updated Dreambooth trainer to the new DreamBooth modules
+- Dependency alignment for upstream changes (Transformers 5 stable + Pillow 12)
 
 ### v0.9.1 - Dependency & UI Improvements
 
