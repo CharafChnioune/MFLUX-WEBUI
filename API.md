@@ -64,23 +64,35 @@ curl -X POST http://localhost:7861/sdapi/v1/txt2img \
 
 | Model Alias | Description | Size | Recommended Use |
 |------------|-------------|------|-----------------|
-| `flux2-klein-4b` | Base 4B model (default) | ~4GB | Fast generation, good quality |
+| `flux2-klein-4b` | Distilled 4B model (default) | ~4GB | Fast generation, good quality |
 | `flux2-klein-4b-mlx-4bit` | Pre-quantized 4-bit | ~1GB | Fastest loading |
 | `flux2-klein-4b-mlx-8bit` | Pre-quantized 8-bit | ~2GB | Good balance |
 | `flux2-klein-4b-3-bit` | Runtime quantized | ~1GB | Maximum compression |
 | `flux2-klein-4b-4-bit` | Runtime quantized | ~1GB | Very fast |
 | `flux2-klein-4b-6-bit` | Runtime quantized | ~1.5GB | Good quality/speed |
 | `flux2-klein-4b-8-bit` | Runtime quantized | ~2GB | Better quality |
-| `flux2-klein-9b` | Base 9B model | ~9GB | Highest quality |
+| `flux2-klein-9b` | Distilled 9B model | ~9GB | Highest quality |
 | `flux2-klein-9b-mlx-4bit` | Pre-quantized 4-bit | ~2.5GB | Fast, high quality |
 | `flux2-klein-9b-mlx-8bit` | Pre-quantized 8-bit | ~4.5GB | Best balance |
 | `flux2-klein-9b-3-bit` | Runtime quantized | ~2.5GB | Compressed high quality |
 | `flux2-klein-9b-4-bit` | Runtime quantized | ~2.5GB | Fast high quality |
 | `flux2-klein-9b-6-bit` | Runtime quantized | ~3.5GB | Premium quality/speed |
 | `flux2-klein-9b-8-bit` | Runtime quantized | ~4.5GB | Maximum quality |
+| `flux2-klein-base-4b` | Base 4B model | Varies | Allows guidance > 1.0 |
+| `flux2-klein-base-4b-mlx-4bit` | Pre-quantized base 4-bit | Varies | Fastest loading (base) |
+| `flux2-klein-base-4b-mlx-8bit` | Pre-quantized base 8-bit | Varies | Good balance (base) |
+| `flux2-klein-base-4b-3-bit` | Runtime quantized (base) | Varies | Maximum compression (base) |
+| `flux2-klein-base-4b-4-bit` | Runtime quantized (base) | Varies | Very fast (base) |
+| `flux2-klein-base-4b-6-bit` | Runtime quantized (base) | Varies | Good quality/speed (base) |
+| `flux2-klein-base-4b-8-bit` | Runtime quantized (base) | Varies | Better quality (base) |
+| `flux2-klein-base-9b` | Base 9B model | Varies | Allows guidance > 1.0 |
+| `flux2-klein-base-9b-3-bit` | Runtime quantized (base) | Varies | Compressed high quality (base) |
+| `flux2-klein-base-9b-4-bit` | Runtime quantized (base) | Varies | Fast high quality (base) |
+| `flux2-klein-base-9b-6-bit` | Runtime quantized (base) | Varies | Premium quality/speed (base) |
+| `flux2-klein-base-9b-8-bit` | Runtime quantized (base) | Varies | Maximum quality (base) |
 | `seedvr2` | Video/image model | Varies | Experimental |
 
-**Note**: Flux2 models use **fixed guidance=1.0** (not configurable).
+**Note**: Distilled Flux2 Klein models use fixed guidance=1.0. Base models allow guidance > 1.0.
 
 ---
 
@@ -120,7 +132,7 @@ Generate images from text prompt (synchronous, blocks until complete).
 | `width` | int | No | 512 | Image width (multiple of 16) |
 | `height` | int | No | 512 | Image height (multiple of 16) |
 | `steps` | int | No | 4 | Number of inference steps (4-20 typical) |
-| `guidance` | float | No | 1.0 | Fixed at 1.0 for Flux2 |
+| `guidance` | float | No | 1.0 | Distilled models override to 1.0; base models allow guidance > 1.0 |
 | `num_images` | int | No | 1 | Number of images to generate (1-4) |
 | `lora_files` | array | No | [] | List of LoRA file paths |
 | `lora_scales` | array | No | [] | LoRA scaling factors (0.0-2.0) |
@@ -646,7 +658,7 @@ generation:
 - ❌ ControlNet (Flux1 only)
 - ❌ In-Context LoRA (Flux1 only)
 - ❌ Kontext mode (Flux1 only)
-- ❌ Adjustable guidance (fixed at 1.0 for Flux2)
+- ✅ Adjustable guidance for base models (distilled models fixed at 1.0)
 
 ---
 

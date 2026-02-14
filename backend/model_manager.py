@@ -61,6 +61,8 @@ def _register_default_models():
         ("flux2-klein-9b-mlx-4bit", "AITRADER/FLUX2-klein-9B-mlx-4bit", 512, "flux2"),
         ("flux2-klein-9b-mlx-8bit", "AITRADER/FLUX2-klein-9B-mlx-8bit", 512, "flux2"),
         ("flux2-klein-base-4b", "black-forest-labs/FLUX.2-klein-base-4B", 512, "flux2"),
+        ("flux2-klein-base-4b-mlx-4bit", "AITRADER/FLUX2-klein-base-4B-mlx-4bit", 512, "flux2"),
+        ("flux2-klein-base-4b-mlx-8bit", "AITRADER/FLUX2-klein-base-4B-mlx-8bit", 512, "flux2"),
         ("flux2-klein-base-9b", "black-forest-labs/FLUX.2-klein-base-9B", 512, "flux2"),
         ("seedvr2", "numz/SeedVR2_comfyUI", 512, "dev"),
     ]
@@ -111,6 +113,8 @@ def _flux2_ordered() -> List[str]:
         "flux2-klein-9b-6-bit",
         "flux2-klein-9b-8-bit",
         "flux2-klein-base-4b",
+        "flux2-klein-base-4b-mlx-4bit",  # Pre-quantized (faster load)
+        "flux2-klein-base-4b-mlx-8bit",  # Pre-quantized (faster load)
         "flux2-klein-base-4b-3-bit",
         "flux2-klein-base-4b-4-bit",
         "flux2-klein-base-4b-6-bit",
