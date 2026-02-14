@@ -60,6 +60,11 @@ class Flux2DevWeightDefinition:
         ]
 
     @staticmethod
+    def get_tokenizers():
+        return []
+
+
+    @staticmethod
     def get_download_patterns():
         # Avoid the gigantic root-level merged `flux2-dev.safetensors` by only
         # requesting component subfolders.
@@ -179,7 +184,11 @@ class Flux2Dev(nn.Module):
         else:
             dtype = torch.float32
 
-        model_root = self._model_path or self.model_config.model_name
+        model_root = self.model_config.model_name
+        if self._model_path:
+            candidate = Path(self._model_path).expanduser()
+            if candidate.exists() and candidate.is_dir() and (candidate / "tokenizer").exists() and (candidate / "text_encoder").exists():
+                model_root = str(candidate)
 
         # Tokenizer lives in `tokenizer/` for FLUX.2-dev.
         self._torch_tokenizer = AutoTokenizer.from_pretrained(
@@ -187,13 +196,17 @@ class Flux2Dev(nn.Module):
             subfolder="tokenizer",
             use_fast=True,
         )
+        if device == "mps" and dtype is torch.bfloat16:
+            dtype = torch.float16
+
         self._torch_text_encoder = Mistral3ForConditionalGeneration.from_pretrained(
             model_root,
             subfolder="text_encoder",
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
-            device_map={"": device} if device != "cpu" else None,
         )
+        if device != "cpu":
+            self._torch_text_encoder.to(device)
         self._torch_text_encoder.eval()
 
     def _mistral3_out_layers(self) -> tuple[int, int, int]:
