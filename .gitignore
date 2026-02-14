@@ -20,3 +20,16 @@ hf_api_key.json
 ollama_settings.json
 
 test_webui.py
+
+# LoRA weights (too large for git)
+lora/*.safetensors
+lora/lora_manifest.json
+
+# Generated output
+output/
+
+# Local config
+config.yaml
+
+# Legacy frontend
+legacy/

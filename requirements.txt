@@ -1,6 +1,5 @@
 mflux>=0.15.4
 mlx>=0.30.3,<0.31.0
-gradio>=6.2.0
 ollama>=0.5.1
 requests>=2.32.5
 beautifulsoup4==4.13.4

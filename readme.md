@@ -1,17 +1,90 @@
-# MFLUX WebUI v0.15.4
+# MFLUX API Server (v2.0.0 - API-Only)
+
+> **🚀 IMPORTANT: This is now an API-only version!**
+>
+> - ❌ **Gradio UI has been removed**
+> - ✅ **REST API only** - All functionality via HTTP endpoints
+> - ✅ **Flux2 Klein models only** (Flux1 removed)
+> - 📖 **See [API.md](API.md) for complete API documentation**
 
 ![MFLUX WebUI Logo](logo.png)
 
-A powerful and user-friendly web interface for MFLUX, powered by Gradio. Now with advanced workflow management, dynamic prompts, and comprehensive configuration support!
+A REST API server for Flux2 Klein image generation on Apple Silicon using MLX.
 
 [![Install with Pinokio](https://img.shields.io/badge/Install%20with-Pinokio-blue)](https://pinokio.computer)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 [![MFLUX](https://img.shields.io/badge/MFLUX-v0.15.4-green)](https://github.com/filipstrand/mflux)
 
-## Introduction
+## Quick Start (API-Only)
 
-MFLUX WebUI is a comprehensive interface for the **MFLUX 0.15.x** image generation library. It provides an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
+### Installation
+```bash
+pip install -r requirements.txt
+```
+
+### Run the API Server
+```bash
+# Default (0.0.0.0:7861)
+python api_main.py
+
+# Custom host/port
+python api_main.py --host 127.0.0.1 --port 8080
+
+# Using environment variables
+MFLUX_API_PORT=9000 python api_main.py
+```
+
+### Make Your First Request
+```bash
+curl -X POST http://localhost:7861/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a beautiful sunset over mountains",
+    "model": "flux2-klein-4b",
+    "steps": 4
+  }'
+```
+
+### API Documentation
+- **Complete API Docs**: [API.md](API.md)
+- **Base URL**: `http://localhost:7861`
+- **Supported Models**: Flux2 Klein 4B/9B (Flux1 removed)
+
+---
+
+## Migration from UI Version
+
+If you were using the UI version:
+
+1. **UI is removed** - Use API endpoints instead
+2. **Flux1 models removed** - Use `flux2-klein-4b` or `flux2-klein-9b`
+3. **See [API.md](API.md)** for endpoint mapping (e.g., UI "Generate" button → `POST /sdapi/v1/txt2img`)
+4. **Old UI code** archived in `legacy/` directory
+
+---
+
+## Supported Models (Flux2 Klein Only)
+
+- `flux2-klein-4b` (default) - 4B base model
+- `flux2-klein-4b-mlx-4bit` - Pre-quantized 4-bit
+- `flux2-klein-4b-mlx-8bit` - Pre-quantized 8-bit
+- `flux2-klein-9b` - 9B base model (highest quality)
+- `flux2-klein-9b-mlx-4bit` - Pre-quantized 4-bit
+- `flux2-klein-9b-mlx-8bit` - Pre-quantized 8-bit
+- All models support runtime quantization (3/4/6/8-bit)
+
+**Note**: Flux2 uses **fixed guidance=1.0** (not adjustable).
+
+---
+
+## Introduction (Legacy UI Information)
+
+> **Note**: The information below describes the legacy UI version.
+> This functionality is now available via REST API endpoints.
+> See [API.md](API.md) for current usage.
+
+MFLUX WebUI was a comprehensive interface for the **MFLUX 0.15.x** image generation library. It provided an intuitive way to interact with MFLUX models, from one-click "easy" generation to specialized tools with advanced workflow management and intelligent prompt processing.
 
 ## Features
 

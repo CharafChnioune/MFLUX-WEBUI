@@ -1,599 +1,707 @@
-# MFLUX-WEBUI API Documentation
+# MFLUX API Documentation
 
 ## Overview
 
-MFLUX-WEBUI exposes a REST API on `http://localhost:7861` (configurable via command-line arguments).
+REST API for **Flux2 Klein** image generation on Apple Silicon using MLX.
 
-- **CORS**: All origins allowed (`Access-Control-Allow-Origin: *`)
-- **Content-Type**: `application/json` for all request/response bodies
-- **Methods**: `GET`, `POST`, `DELETE`, `OPTIONS`
+This is an **API-only** version - the Gradio UI has been removed. All functionality is accessed via REST endpoints.
 
-The API has two layers:
+### Key Features
+- ✅ Flux2 Klein 4B and 9B models (Flux1 removed)
+- ✅ Automatic model downloading
+- ✅ Quantization support (3/4/6/8-bit)
+- ✅ LoRA support
+- ✅ Async job management with SSE streaming
+- ✅ SD-WebUI compatible endpoints
+- ✅ Apple Silicon optimized (MLX)
 
-1. **SD WebUI-compatible endpoints** — synchronous (blocking) endpoints compatible with Stable Diffusion WebUI clients such as Open WebUI.
-2. **Async Job API** — non-blocking endpoints that return a job ID immediately and stream progress via Server-Sent Events (SSE).
+### Base URL
+```
+http://localhost:7861
+```
+
+### CORS
+All origins allowed (`Access-Control-Allow-Origin: *`)
 
 ---
 
-## SD WebUI-Compatible Endpoints
+## Quick Start
 
-These endpoints block until the operation completes and return the result directly.
+### Installation
+```bash
+cd MFLUX-WEBUI
+pip install -r requirements.txt
+```
 
-### POST /sdapi/v1/txt2img
+### Start the Server
+```bash
+# Default (0.0.0.0:7861)
+python api_main.py
 
-Generate images from a text prompt.
+# Custom host/port
+python api_main.py --host 127.0.0.1 --port 8080
 
-**Request body:**
+# Using environment variables
+MFLUX_API_PORT=9000 python api_main.py
+```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt` | string | *(required)* | Text prompt for generation |
-| `model` | string | current model | Model alias to use |
-| `sd_model_checkpoint` | string | current model | Alternative model field (SD WebUI compat) |
-| `override_settings.sd_model_checkpoint` | string | — | Nested model override |
-| `seed` | int/null | null | Random seed (null = random) |
-| `width` | int | 576 | Image width in pixels |
-| `height` | int | 1024 | Image height in pixels |
-| `steps` | int/string | "" (model default) | Number of inference steps |
-| `guidance` | float | 3.5 | Guidance scale |
-| `num_images` | int | 1 | Number of images to generate |
-| `auto_seeds` | bool | false | Auto-increment seeds for batch |
-| `lora_files` | array/null | null | LoRA file paths to apply |
-| `low_ram` | bool | false | Enable low-RAM mode |
+### First Request
+```bash
+curl -X POST http://localhost:7861/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a beautiful sunset over mountains",
+    "model": "flux2-klein-4b",
+    "steps": 4
+  }'
+```
 
-**Response (200):**
+---
 
+## Supported Models
+
+### Flux2 Klein Models (Flux1 removed)
+
+| Model Alias | Description | Size | Recommended Use |
+|------------|-------------|------|-----------------|
+| `flux2-klein-4b` | Base 4B model (default) | ~4GB | Fast generation, good quality |
+| `flux2-klein-4b-mlx-4bit` | Pre-quantized 4-bit | ~1GB | Fastest loading |
+| `flux2-klein-4b-mlx-8bit` | Pre-quantized 8-bit | ~2GB | Good balance |
+| `flux2-klein-4b-3-bit` | Runtime quantized | ~1GB | Maximum compression |
+| `flux2-klein-4b-4-bit` | Runtime quantized | ~1GB | Very fast |
+| `flux2-klein-4b-6-bit` | Runtime quantized | ~1.5GB | Good quality/speed |
+| `flux2-klein-4b-8-bit` | Runtime quantized | ~2GB | Better quality |
+| `flux2-klein-9b` | Base 9B model | ~9GB | Highest quality |
+| `flux2-klein-9b-mlx-4bit` | Pre-quantized 4-bit | ~2.5GB | Fast, high quality |
+| `flux2-klein-9b-mlx-8bit` | Pre-quantized 8-bit | ~4.5GB | Best balance |
+| `flux2-klein-9b-3-bit` | Runtime quantized | ~2.5GB | Compressed high quality |
+| `flux2-klein-9b-4-bit` | Runtime quantized | ~2.5GB | Fast high quality |
+| `flux2-klein-9b-6-bit` | Runtime quantized | ~3.5GB | Premium quality/speed |
+| `flux2-klein-9b-8-bit` | Runtime quantized | ~4.5GB | Maximum quality |
+| `seedvr2` | Video/image model | Varies | Experimental |
+
+**Note**: Flux2 models use **fixed guidance=1.0** (not configurable).
+
+---
+
+## API Endpoints
+
+### 1. Image Generation (SD-WebUI Compatible)
+
+#### POST /sdapi/v1/txt2img
+
+Generate images from text prompt (synchronous, blocks until complete).
+
+**Request Body:**
 ```json
 {
-  "images": ["<base64-png>", ...],
-  "parameters": { ... },
-  "info": "...",
-  "prompt": "actual prompt used"
+  "prompt": "a beautiful landscape with mountains and lakes",
+  "model": "flux2-klein-4b",
+  "seed": 42,
+  "width": 512,
+  "height": 512,
+  "steps": 4,
+  "guidance": 1.0,
+  "num_images": 1,
+  "lora_files": [],
+  "lora_scales": [],
+  "low_ram": false
 }
 ```
 
----
+**Parameters:**
 
-### POST /sdapi/v1/img2img
-
-Generate images from a text prompt + input image.
-
-**Request body:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt` | string | *(required)* | Text prompt |
-| `init_images` | array | *(required)* | Array of base64-encoded images (first is used) |
-| `images` | array | — | Alternative field for `init_images` |
-| `model` | string | current model | Model alias |
-| `seed` | int/null | null | Random seed |
-| `width` | int | input image width | Output width |
-| `height` | int | input image height | Output height |
-| `steps` | int/string | "" | Inference steps |
-| `guidance` | float | 3.5 | Guidance scale |
-| `num_images` | int | 1 | Number of images |
-| `auto_seeds` | bool | false | Auto-increment seeds |
-| `image_strength` | float | 0.4 | How much to preserve the input image (0.0–1.0) |
-| `lora_files` | array/null | null | LoRA files |
-| `low_ram` | bool | false | Low-RAM mode |
-
-**Response (200):** Same format as txt2img.
-
----
-
-### POST /sdapi/v1/controlnet
-
-Generate images using a ControlNet conditioning image.
-
-**Request body:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt` | string | *(required)* | Text prompt |
-| `controlnet_image` | array | *(required)* | Base64-encoded ControlNet images |
-| `controlnet_images` | array | — | Alternative field |
-| `init_images` | array | — | Alternative field |
-| `model` | string | current model | Model alias |
-| `seed` | int/null | null | Random seed |
-| `width` | int | input image width | Output width |
-| `height` | int | input image height | Output height |
-| `steps` | int/string | "" | Inference steps |
-| `guidance` | float | 3.5 | Guidance scale |
-| `controlnet_strength` | float | 0.4 | ControlNet conditioning strength (0.0–1.0) |
-| `lora_files` | array/null | null | LoRA files |
-| `low_ram` | bool | false | Low-RAM mode |
-
-**Response (200):** Same format as txt2img.
-
----
-
-### POST /api/upscale
-
-Upscale an image by a given factor.
-
-**Request body:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `image` | string | *(required)* | Base64-encoded image |
-| `upscale_factor` | int | 2 | Upscale factor |
-| `output_format` | string | "PNG" | Output format (e.g. "PNG", "JPEG") |
-| `metadata` | bool | false | Include metadata in output |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `prompt` | string | ✅ Yes | - | Text description of desired image |
+| `model` | string | No | `flux2-klein-4b` | Model to use (see Supported Models) |
+| `sd_model_checkpoint` | string | No | - | Alternative model field (SD-WebUI compat) |
+| `seed` | int/null | No | null | Random seed (null = random) |
+| `width` | int | No | 512 | Image width (multiple of 16) |
+| `height` | int | No | 512 | Image height (multiple of 16) |
+| `steps` | int | No | 4 | Number of inference steps (4-20 typical) |
+| `guidance` | float | No | 1.0 | Fixed at 1.0 for Flux2 |
+| `num_images` | int | No | 1 | Number of images to generate (1-4) |
+| `lora_files` | array | No | [] | List of LoRA file paths |
+| `lora_scales` | array | No | [] | LoRA scaling factors (0.0-2.0) |
+| `low_ram` | bool | No | false | Enable low-RAM mode |
 
 **Response (200):**
-
 ```json
 {
-  "images": ["<base64-png>"],
-  "info": "...",
-  "parameters": { ... }
-}
-```
-
----
-
-### GET /sdapi/v1/options
-
-Get current server options (SD WebUI compatibility).
-
-**Response (200):**
-
-```json
-{
-  "sd_model_checkpoint": "schnell-4-bit",
-  "sd_model_checkpoint_hash": "",
-  "sd_vae": "auto",
-  "CLIP_stop_at_last_layers": 2,
-  "inpainting_fill": 1
-}
-```
-
----
-
-### POST /sdapi/v1/options
-
-Update server options (primarily model selection).
-
-**Request body:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `sd_model_checkpoint` | string | Model alias to select |
-
-**Response (200):** Returns the updated options (same format as GET).
-
----
-
-### GET /sdapi/v1/sd-models
-
-List available models in SD WebUI format.
-
-**Response (200):**
-
-```json
-[
-  {
-    "title": "schnell-4-bit",
-    "model_name": "mlx-community/...",
-    "hash": "",
-    "sha256": "",
-    "filename": "schnell-4-bit",
-    "config": "flux1"
-  }
-]
-```
-
----
-
-## Async Job API
-
-Non-blocking endpoints. Submit a job, get an ID back, and track progress via polling or SSE.
-
-### POST /api/v1/generate
-
-Submit an async generation job.
-
-**Request body:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | string | "txt2img" | Job type: `txt2img`, `img2img`, `controlnet`, `upscale` |
-| `prompt` | string | *(required for txt2img/img2img/controlnet)* | Text prompt |
-| All other fields | — | — | Same as the corresponding sync endpoint |
-
-**Response (202):**
-
-```json
-{
-  "job_id": "a1b2c3d4e5f6",
-  "status": "queued",
-  "type": "txt2img"
-}
-```
-
----
-
-### GET /api/v1/jobs/{id}
-
-Get job status and result.
-
-**Response (200):**
-
-```json
-{
-  "job_id": "a1b2c3d4e5f6",
-  "type": "txt2img",
-  "status": "running",
-  "progress": {
-    "current_image": 1,
-    "total_images": 2,
-    "percent": 50.0,
-    "stage": "generating"
+  "images": [
+    "iVBORw0KGgoAAAANSUhEUgAA..."
+  ],
+  "parameters": {
+    "prompt": "a beautiful landscape...",
+    "seed": 42,
+    "steps": 4,
+    "model": "flux2-klein-4b"
   },
-  "created_at": 1700000000.0,
-  "started_at": 1700000001.0,
-  "completed_at": null,
-  "result": null,
-  "error": null
+  "info": "Generated 1 image(s) in 2.5s"
 }
 ```
 
-When completed, `result` contains:
-
-```json
-{
-  "images": ["<base64-png>", ...],
-  "info": "...",
-  "prompt": "actual prompt used"
-}
+**Example (curl):**
+```bash
+curl -X POST http://localhost:7861/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "astronaut riding a horse on mars",
+    "model": "flux2-klein-4b",
+    "steps": 4,
+    "seed": 123
+  }' | jq -r '.images[0]' | base64 -d > output.png
 ```
 
-When failed, `error` contains:
+**Example (Python):**
+```python
+import requests
+import base64
+from io import BytesIO
+from PIL import Image
 
-```json
-{
-  "code": "GENERATION_FAILED",
-  "message": "Error description",
-  "details": "full traceback",
-  "stage": "generating"
-}
+response = requests.post(
+    "http://localhost:7861/sdapi/v1/txt2img",
+    json={
+        "prompt": "a serene japanese garden with cherry blossoms",
+        "model": "flux2-klein-4b",
+        "steps": 4,
+        "width": 768,
+        "height": 512
+    }
+)
+
+data = response.json()
+image_b64 = data["images"][0]
+image = Image.open(BytesIO(base64.b64decode(image_b64)))
+image.save("generated.png")
+print(f"Generated image: {data['info']}")
 ```
 
 ---
 
-### GET /api/v1/jobs/{id}/stream
+#### POST /sdapi/v1/img2img
 
-Stream job events via Server-Sent Events (SSE).
+Image-to-image generation (Flux2 Edit mode).
 
-**Response headers:**
-
+**Request Body:**
+```json
+{
+  "prompt": "turn this into a watercolor painting",
+  "init_images": ["base64_encoded_image"],
+  "model": "flux2-klein-4b",
+  "image_strength": 0.75,
+  "steps": 4
+}
 ```
-Content-Type: text/event-stream
-Cache-Control: no-cache
-Connection: keep-alive
-```
 
-The stream immediately sends the current status and replays any existing log lines. A heartbeat comment (`: heartbeat`) is sent every 15 seconds to keep the connection alive. The stream closes automatically when the job reaches a terminal state (`completed`, `failed`, or `cancelled`).
+**Additional Parameters:**
 
-See [SSE Event Types](#sse-event-types) for event details.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `init_images` | array | *(required)* | Base64-encoded input images |
+| `image_strength` | float | 0.75 | How much to transform (0.0-1.0) |
 
 ---
 
-### DELETE /api/v1/jobs/{id}
+### 2. Async Job API
 
-Cancel a running or queued job.
+For long-running generations, use async endpoints with job tracking.
+
+#### POST /api/v1/generate
+
+Submit async generation job (returns immediately).
+
+**Request Body:**
+```json
+{
+  "prompt": "a futuristic city at night",
+  "model": "flux2-klein-9b",
+  "steps": 8,
+  "num_images": 4
+}
+```
 
 **Response (200):**
-
 ```json
 {
-  "job_id": "a1b2c3d4e5f6",
+  "job_id": "a3f2b8c9d4e5",
+  "status": "queued",
+  "position": 1
+}
+```
+
+---
+
+#### GET /api/v1/jobs
+
+List all jobs.
+
+**Response (200):**
+```json
+{
+  "jobs": [
+    {
+      "id": "a3f2b8c9d4e5",
+      "status": "generating",
+      "progress": 0.75,
+      "prompt": "a futuristic city..."
+    }
+  ]
+}
+```
+
+---
+
+#### GET /api/v1/jobs/{job_id}
+
+Get job status.
+
+**Response (200):**
+```json
+{
+  "id": "a3f2b8c9d4e5",
+  "status": "completed",
+  "progress": 1.0,
+  "result": {
+    "images": ["base64..."],
+    "seeds": [42, 43, 44, 45]
+  },
+  "created_at": "2026-02-08T10:30:00Z",
+  "completed_at": "2026-02-08T10:32:15Z"
+}
+```
+
+**Status Values:**
+- `queued` - Waiting in queue
+- `generating` - Currently generating
+- `completed` - Finished successfully
+- `failed` - Error occurred
+- `cancelled` - User cancelled
+
+---
+
+#### GET /api/v1/jobs/{job_id}/stream
+
+Server-Sent Events (SSE) stream for real-time progress.
+
+**Example (JavaScript):**
+```javascript
+const eventSource = new EventSource('/api/v1/jobs/a3f2b8c9d4e5/stream');
+
+eventSource.addEventListener('progress', (e) => {
+  const data = JSON.parse(e.data);
+  console.log(`Progress: ${data.progress * 100}%`);
+});
+
+eventSource.addEventListener('complete', (e) => {
+  const data = JSON.parse(e.data);
+  console.log('Generation complete!', data.result);
+  eventSource.close();
+});
+```
+
+---
+
+#### DELETE /api/v1/jobs/{job_id}
+
+Cancel a running job.
+
+**Response (200):**
+```json
+{
   "status": "cancelled"
 }
 ```
 
 ---
 
-### GET /api/v1/jobs
+### 3. Model Management
 
-List all jobs.
+#### GET /api/v1/models
 
-**Response (200):**
-
-```json
-{
-  "jobs": [
-    {
-      "job_id": "a1b2c3d4e5f6",
-      "type": "txt2img",
-      "status": "completed",
-      "progress": { ... },
-      "created_at": 1700000000.0,
-      "started_at": 1700000001.0,
-      "completed_at": 1700000030.0,
-      "result": { ... }
-    }
-  ]
-}
-```
-
----
-
-## System Endpoints
-
-### GET /api/v1/health
-
-Health check.
+List all available models.
 
 **Response (200):**
-
-```json
-{
-  "status": "ok",
-  "timestamp": 1700000000.0
-}
-```
-
----
-
-### GET /api/v1/models
-
-List available models with capabilities.
-
-**Response (200):**
-
 ```json
 {
   "models": [
     {
-      "name": "schnell-4-bit",
-      "capabilities": ["txt2img", "img2img", "controlnet"],
-      "base_arch": "flux1",
-      "hf_name": "mlx-community/..."
+      "title": "flux2-klein-4b",
+      "model_name": "black-forest-labs/FLUX.2-klein-4B",
+      "hash": "abc123...",
+      "sha256": "def456...",
+      "config": {
+        "base_arch": "flux2",
+        "supports_guidance": false,
+        "max_sequence_length": 512
+      },
+      "downloaded": true,
+      "size_gb": 4.2
     }
   ]
 }
 ```
 
-> Note: Models with `base_arch: "flux2"` only support `txt2img`.
-
 ---
 
-### GET /api/v1/system
+#### GET /api/v1/models/{model_id}/status
 
-System information including memory usage and queue depth.
-
-**Response (200):**
-
-```json
-{
-  "active_model": "schnell-4-bit",
-  "queue_depth": 0,
-  "memory": {
-    "active_mb": 1234.56,
-    "peak_mb": 2345.67
-  }
-}
-```
-
-`memory` is `null` when MLX Metal memory info is not available.
-
----
-
-### GET /api/v1/queue
-
-Current queue status.
+Get model download/load status.
 
 **Response (200):**
-
 ```json
 {
-  "pending": [ { ...job... } ],
-  "pending_count": 1,
-  "running": [ { ...job... } ],
-  "running_count": 1
+  "model": "flux2-klein-9b",
+  "status": "ready",
+  "downloaded": true,
+  "loaded": false,
+  "size_gb": 9.1,
+  "path": "/path/to/models/flux2-klein-9b"
 }
 ```
 
 ---
 
-### GET /api/v1/stats
+### 4. System Information
 
-Job statistics.
+#### GET /api/v1/health
+
+Health check endpoint.
 
 **Response (200):**
-
 ```json
 {
-  "total_jobs": 42,
-  "by_status": {
-    "completed": 38,
-    "failed": 2,
-    "running": 1,
-    "queued": 1
+  "status": "healthy",
+  "version": "2.0.0",
+  "models_available": 14,
+  "active_jobs": 1,
+  "queue_length": 2
+}
+```
+
+---
+
+#### GET /api/v1/system
+
+System status and memory info.
+
+**Response (200):**
+```json
+{
+  "active_model": "flux2-klein-4b",
+  "mlx_memory_gb": 4.2,
+  "system_memory_gb": {
+    "total": 32,
+    "used": 16,
+    "free": 16
   },
-  "queue_depth": 1,
-  "avg_duration": 12.34
+  "device": "Apple M2 Max"
 }
 ```
 
 ---
 
-## SSE Event Types
+#### GET /api/v1/queue
 
-Events sent on the `GET /api/v1/jobs/{id}/stream` endpoint:
+Get current generation queue status.
 
-| Event | Description | Data fields |
-|-------|-------------|-------------|
-| `status` | Job status changed | `job_id`, `status` |
-| `progress` | Generation progress update | `current_image`, `total_images`, `percent`, `stage` |
-| `log` | Captured console output line | `timestamp`, `level`, `message` |
-| `result` | Job completed with images | `images` (base64 array), `info`, `prompt` |
-| `error` | Job failed or cancelled | `code`, `message`, `details` (optional), `stage` (optional) |
-
-**Progress stages:** `loading_model`, `generating`, `saving`, `upscaling`, `completed`
-
-**SSE format example:**
-
-```
-event: progress
-data: {"current_image":1,"total_images":2,"percent":50.0,"stage":"generating"}
-
-event: result
-data: {"images":["<base64>"],"info":"...","prompt":"..."}
-```
-
----
-
-## Error Codes
-
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `INVALID_JSON` | 400 | Request body is not valid JSON |
-| `MISSING_PARAM` | 400 | A required parameter is missing |
-| `INVALID_PARAM` | 400 | A parameter has an invalid value |
-| `GENERATION_FAILED` | 500 | Image generation failed |
-| `MODEL_LOAD_FAILED` | 500 | Model could not be loaded |
-| `OUT_OF_MEMORY` | 500 | GPU/Metal memory exhausted |
-| `JOB_NOT_FOUND` | 404 | Job ID does not exist |
-| `JOB_ALREADY_COMPLETED` | — | Job has already finished (cannot cancel) |
-| `CANCELLED` | — | Job was cancelled by the user |
-
-**Error response format:**
-
+**Response (200):**
 ```json
 {
-  "error": {
-    "code": "MISSING_PARAM",
-    "message": "prompt is required",
-    "details": "optional extra info",
-    "stage": "optional stage where error occurred"
-  }
-}
-```
-
-For sync endpoints, errors use the simpler format:
-
-```json
-{
-  "error": "error message string"
+  "active": {
+    "job_id": "a3f2b8c9d4e5",
+    "prompt": "a futuristic city...",
+    "progress": 0.5,
+    "eta_seconds": 45
+  },
+  "queued": [
+    {
+      "job_id": "b4g3c0d1e6f7",
+      "position": 1,
+      "prompt": "abstract art..."
+    }
+  ]
 }
 ```
 
 ---
 
-## Examples
+#### GET /api/v1/stats
 
-### curl — Text to Image (sync)
+Performance statistics.
+
+**Response (200):**
+```json
+{
+  "total_generations": 156,
+  "total_images": 412,
+  "average_time_seconds": 3.2,
+  "uptime_hours": 48.5
+}
+```
+
+---
+
+## Complete Workflow Examples
+
+### Example 1: Generate and Download Image
 
 ```bash
+# 1. Generate image
 curl -X POST http://localhost:7861/sdapi/v1/txt2img \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "a cat sitting on a windowsill, golden hour",
-    "model": "schnell-4-bit",
-    "width": 576,
-    "height": 1024,
+    "prompt": "sunset over mountains, vibrant colors",
+    "model": "flux2-klein-4b",
     "steps": 4,
-    "guidance": 3.5
+    "width": 1024,
+    "height": 576
+  }' | jq -r '.images[0]' | base64 -d > sunset.png
+
+echo "Image saved to sunset.png"
+```
+
+### Example 2: Async Generation with Progress Monitoring
+
+```python
+import requests
+import time
+
+# Submit job
+response = requests.post(
+    "http://localhost:7861/api/v1/generate",
+    json={
+        "prompt": "abstract geometric patterns, colorful",
+        "model": "flux2-klein-4b",
+        "steps": 8,
+        "num_images": 4
+    }
+)
+job_id = response.json()["job_id"]
+print(f"Job submitted: {job_id}")
+
+# Poll for completion
+while True:
+    status = requests.get(f"http://localhost:7861/api/v1/jobs/{job_id}").json()
+
+    if status["status"] == "completed":
+        print("Generation complete!")
+        for i, img_b64 in enumerate(status["result"]["images"]):
+            with open(f"output_{i}.png", "wb") as f:
+                f.write(base64.b64decode(img_b64))
+        break
+    elif status["status"] == "failed":
+        print(f"Generation failed: {status.get('error')}")
+        break
+
+    print(f"Progress: {status['progress'] * 100:.1f}%")
+    time.sleep(2)
+```
+
+### Example 3: Use Pre-Quantized Model for Speed
+
+```bash
+# Pre-quantized models load faster
+curl -X POST http://localhost:7861/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a cyberpunk street scene",
+    "model": "flux2-klein-4b-mlx-4bit",
+    "steps": 4
   }'
 ```
 
-### curl — Async generation with SSE streaming
+### Example 4: Batch Generation with Different Seeds
 
-```bash
-# Submit job
-JOB=$(curl -s -X POST http://localhost:7861/api/v1/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "txt2img",
-    "prompt": "a cat sitting on a windowsill, golden hour",
-    "model": "schnell-4-bit",
-    "width": 576,
-    "height": 1024
-  }')
+```python
+import requests
+import base64
 
-JOB_ID=$(echo $JOB | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+prompts = [
+    "a peaceful forest scene",
+    "a bustling city street",
+    "an alien landscape"
+]
 
-# Stream events
-curl -N http://localhost:7861/api/v1/jobs/$JOB_ID/stream
+for i, prompt in enumerate(prompts):
+    response = requests.post(
+        "http://localhost:7861/sdapi/v1/txt2img",
+        json={
+            "prompt": prompt,
+            "model": "flux2-klein-4b",
+            "steps": 4,
+            "seed": i * 100  # Different seed for each
+        }
+    )
+
+    img_b64 = response.json()["images"][0]
+    with open(f"batch_{i}.png", "wb") as f:
+        f.write(base64.b64decode(img_b64))
+
+    print(f"Generated: {prompt}")
 ```
 
-### curl — Image to Image (sync)
+---
 
-```bash
-# Encode an image to base64
-IMG_B64=$(base64 < input.png)
+## Error Handling
 
-curl -X POST http://localhost:7861/sdapi/v1/img2img \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"prompt\": \"oil painting style\",
-    \"init_images\": [\"$IMG_B64\"],
-    \"image_strength\": 0.4
-  }"
-```
+### HTTP Status Codes
 
-### JavaScript — Async generation with EventSource
+| Code | Description |
+|------|-------------|
+| 200 | Success |
+| 400 | Bad Request (invalid parameters) |
+| 404 | Not Found (model/job not found) |
+| 500 | Internal Server Error (generation failed) |
+| 503 | Service Unavailable (server overloaded) |
 
-```javascript
-// Submit a job
-const response = await fetch("http://localhost:7861/api/v1/generate", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    type: "txt2img",
-    prompt: "a cat sitting on a windowsill, golden hour",
-    model: "schnell-4-bit",
-    width: 576,
-    height: 1024,
-  }),
-});
+### Error Response Format
 
-const { job_id } = await response.json();
-
-// Stream events
-const source = new EventSource(
-  `http://localhost:7861/api/v1/jobs/${job_id}/stream`
-);
-
-source.addEventListener("progress", (e) => {
-  const data = JSON.parse(e.data);
-  console.log(`Progress: ${data.percent}% — ${data.stage}`);
-});
-
-source.addEventListener("result", (e) => {
-  const data = JSON.parse(e.data);
-  const img = document.createElement("img");
-  img.src = `data:image/png;base64,${data.images[0]}`;
-  document.body.appendChild(img);
-  source.close();
-});
-
-source.addEventListener("error", (e) => {
-  if (e.data) {
-    const data = JSON.parse(e.data);
-    console.error(`Job failed: ${data.code} — ${data.message}`);
-  }
-  source.close();
-});
-```
-
-### JavaScript — Poll job status
-
-```javascript
-async function pollJob(jobId) {
-  while (true) {
-    const res = await fetch(
-      `http://localhost:7861/api/v1/jobs/${jobId}`
-    );
-    const job = await res.json();
-
-    if (job.status === "completed") return job.result;
-    if (job.status === "failed") throw new Error(job.error.message);
-    if (job.status === "cancelled") throw new Error("Job cancelled");
-
-    await new Promise((r) => setTimeout(r, 1000));
+```json
+{
+  "error": "Invalid model specified",
+  "code": "INVALID_MODEL",
+  "details": {
+    "model": "invalid-model-name",
+    "available_models": ["flux2-klein-4b", "flux2-klein-9b"]
   }
 }
 ```
+
+### Common Errors
+
+**Invalid Model:**
+```json
+{
+  "error": "Model 'schnell' not found. Flux1 models removed. Use flux2-klein-4b or flux2-klein-9b",
+  "code": "MODEL_NOT_FOUND"
+}
+```
+
+**Out of Memory:**
+```json
+{
+  "error": "Insufficient memory. Try using a quantized model or low_ram mode",
+  "code": "OOM_ERROR",
+  "details": {
+    "suggestion": "Use flux2-klein-4b-mlx-4bit or set low_ram=true"
+  }
+}
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MFLUX_API_HOST` | `0.0.0.0` | Host to bind to |
+| `MFLUX_API_PORT` | `7861` | Port to listen on |
+| `MFLUX_DEFAULT_MODEL` | `flux2-klein-4b` | Default model |
+| `MFLUX_OUTPUT_DIR` | `./output` | Output directory for images |
+| `MFLUX_MODELS_DIR` | `./models` | Model cache directory |
+
+### Config File
+
+Copy `config.yaml.example` to `config.yaml` and customize:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 7861
+
+models:
+  default: "flux2-klein-4b"
+  auto_download: true
+  cache_dir: "./models"
+
+generation:
+  default_steps: 4
+  max_batch_size: 4
+  output_dir: "./output"
+```
+
+---
+
+## Migration from UI Version
+
+### UI Action → API Equivalent
+
+| Old UI Action | New API Approach |
+|---------------|------------------|
+| Select model in dropdown | Set `"model": "flux2-klein-4b"` in request |
+| Enter prompt in text area | Set `"prompt": "..."` in request |
+| Click "Generate" button | POST to `/sdapi/v1/txt2img` |
+| Adjust steps slider | Set `"steps": 8` in request |
+| Upload LoRA | Use `"lora_files": ["/path/to/lora"]` |
+| View output gallery | Parse `images` array from response |
+| Download image | Decode base64 and save |
+
+### Removed Features (Flux1 Only)
+
+- ❌ ControlNet (Flux1 only)
+- ❌ In-Context LoRA (Flux1 only)
+- ❌ Kontext mode (Flux1 only)
+- ❌ Adjustable guidance (fixed at 1.0 for Flux2)
+
+---
+
+## Performance Tips
+
+### Model Selection
+
+- **Fast generation**: Use `flux2-klein-4b-mlx-4bit`
+- **Best quality**: Use `flux2-klein-9b`
+- **Balanced**: Use `flux2-klein-4b-mlx-8bit` or `flux2-klein-9b-mlx-4bit`
+
+### Memory Optimization
+
+```python
+# Low RAM mode (slower but uses less memory)
+response = requests.post(
+    "http://localhost:7861/sdapi/v1/txt2img",
+    json={
+        "prompt": "...",
+        "model": "flux2-klein-4b-mlx-4bit",
+        "low_ram": True
+    }
+)
+```
+
+### Batch Processing
+
+Generate multiple images by increasing `num_images` instead of making multiple API calls:
+
+```python
+# Better: Single request with batch
+response = requests.post("...", json={"num_images": 4})
+
+# Worse: Multiple requests
+for i in range(4):
+    response = requests.post("...", json={"num_images": 1})
+```
+
+---
+
+## Support
+
+- **GitHub**: [MFLUX-WEBUI Repository](https://github.com/your-repo)
+- **Issues**: [Report a bug](https://github.com/your-repo/issues)
+- **Documentation**: This file and `config.yaml.example`
+
+---
+
+## Changelog
+
+### Version 2.0.0 (API-Only)
+- ✅ Removed Gradio UI (API-only)
+- ✅ Removed Flux1 models (Flux2 Klein only)
+- ✅ Updated default model to `flux2-klein-4b`
+- ✅ Added comprehensive API documentation
+- ✅ Added `api_main.py` entry point
+- ✅ Created `config.yaml.example`
+- ✅ Removed Gradio dependency

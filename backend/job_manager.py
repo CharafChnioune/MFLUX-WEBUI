@@ -219,13 +219,15 @@ class JobManager:
         num_images = int(params.get("num_images", 1))
         auto_seeds = bool(params.get("auto_seeds", False))
         lora_files = params.get("lora_files") or None
+        lora_scales = params.get("lora_scales") or []
         low_ram = bool(params.get("low_ram", False))
 
         progress_callback("stage", "loading_model")
 
         images, info, used_prompt = generate_image_gradio(
             prompt, model, None, seed, width, height, steps, guidance,
-            lora_files, False, None, None, None, None, None, False, None,
+            lora_files, False, None, None, None, None, None, False, 1,
+            *lora_scales,
             num_images=num_images, low_ram=low_ram, auto_seeds=auto_seeds,
             progress_callback=progress_callback,
         )

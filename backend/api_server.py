@@ -43,7 +43,7 @@ from backend.model_manager import get_updated_models, get_custom_model_config
 
 HOST = "0.0.0.0"
 PORT = 7861
-DEFAULT_MODEL = "schnell-4-bit"
+DEFAULT_MODEL = "flux2-klein-4b"
 _CURRENT_MODEL = None
 
 # Regex patterns for path-parameter routes
@@ -122,19 +122,25 @@ def _list_models_payload():
 
 
 def _bad_request(handler, message, status=400):
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.end_headers()
-    handler.wfile.write(json.dumps({"error": message}).encode("utf-8"))
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+        handler.wfile.write(json.dumps({"error": message}).encode("utf-8"))
+    except BrokenPipeError:
+        pass
 
 
 def _json_response(handler, payload, status=200):
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.end_headers()
-    handler.wfile.write(json.dumps(payload, default=str).encode("utf-8"))
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+        handler.wfile.write(json.dumps(payload, default=str).encode("utf-8"))
+    except BrokenPipeError:
+        pass
 
 
 def _encode_pil_to_base64(image):
@@ -160,6 +166,13 @@ def _save_temp_image(img: Image.Image) -> str:
 
 
 class APIServer(BaseHTTPRequestHandler):
+
+    def handle(self):
+        """Override to suppress BrokenPipeError tracebacks from disconnected clients."""
+        try:
+            super().handle()
+        except BrokenPipeError:
+            pass
 
     # ── CORS ────────────────────────────────────────────────────────
 
@@ -263,11 +276,17 @@ class APIServer(BaseHTTPRequestHandler):
         seed = data.get("seed")
         width = int(data.get("width", 576))
         height = int(data.get("height", 1024))
-        steps = str(data.get("steps", ""))  # blank => default per model
-        guidance = float(data.get("guidance", 3.5))
+        # Accept common aliases.
+        steps = str(data.get("steps") or data.get("num_inference_steps") or "")  # blank => default per model
+        guidance = float(data.get("guidance") or data.get("guidance_scale") or 3.5)
         num_images = int(data.get("num_images", 1))
         auto_seeds = bool(data.get("auto_seeds", False))
         lora_files = data.get("lora_files") or None
+        lora_scales = data.get("lora_scales") or []
+        if lora_scales is None:
+            lora_scales = []
+        if not isinstance(lora_scales, list):
+            lora_scales = [lora_scales]
         low_ram = bool(data.get("low_ram", False))
 
         try:
@@ -288,13 +307,17 @@ class APIServer(BaseHTTPRequestHandler):
                 None,
                 None,
                 False,
-                None,
+                1,
+                *lora_scales,
                 num_images=num_images,
                 low_ram=low_ram,
                 auto_seeds=auto_seeds,
             )
         except Exception as exc:  # noqa: BLE001
             return _bad_request(self, f"Generation failed: {exc}", status=500)
+
+        if not images:
+            return _bad_request(self, info or "No images were generated successfully", status=500)
 
         encoded_images = [_encode_pil_to_base64(img) for img in images]
         response = {
@@ -324,12 +347,17 @@ class APIServer(BaseHTTPRequestHandler):
         seed = data.get("seed")
         width = int(data.get("width", init_img.width))
         height = int(data.get("height", init_img.height))
-        steps = str(data.get("steps", ""))
-        guidance = float(data.get("guidance", 3.5))
+        steps = str(data.get("steps") or data.get("num_inference_steps") or "")
+        guidance = float(data.get("guidance") or data.get("guidance_scale") or 3.5)
         num_images = int(data.get("num_images", 1))
         auto_seeds = bool(data.get("auto_seeds", False))
-        image_strength = float(data.get("image_strength", 0.4))
+        image_strength = float(data.get("image_strength") or data.get("denoising_strength") or 0.4)
         lora_files = data.get("lora_files") or None
+        lora_scales = data.get("lora_scales") or []
+        if lora_scales is None:
+            lora_scales = []
+        if not isinstance(lora_scales, list):
+            lora_scales = [lora_scales]
         low_ram = bool(data.get("low_ram", False))
 
         try:
@@ -350,12 +378,16 @@ class APIServer(BaseHTTPRequestHandler):
                 None,
                 None,
                 False,
-                None,
+                1,
+                *lora_scales,
                 num_images=num_images,
                 low_ram=low_ram,
             )
         except Exception as exc:  # noqa: BLE001
             return _bad_request(self, f"Img2Img failed: {exc}", status=500)
+
+        if not images:
+            return _bad_request(self, info or "No images were generated successfully", status=500)
 
         encoded_images = [_encode_pil_to_base64(img) for img in images]
         response = {
@@ -385,10 +417,15 @@ class APIServer(BaseHTTPRequestHandler):
         seed = data.get("seed")
         width = int(data.get("width", controlnet_img.width))
         height = int(data.get("height", controlnet_img.height))
-        steps = str(data.get("steps", ""))
-        guidance = float(data.get("guidance", 3.5))
+        steps = str(data.get("steps") or data.get("num_inference_steps") or "")
+        guidance = float(data.get("guidance") or data.get("guidance_scale") or 3.5)
         controlnet_strength = float(data.get("controlnet_strength", 0.4))
         lora_files = data.get("lora_files") or None
+        lora_scales = data.get("lora_scales") or []
+        if lora_scales is None:
+            lora_scales = []
+        if not isinstance(lora_scales, list):
+            lora_scales = [lora_scales]
         low_ram = bool(data.get("low_ram", False))
 
         try:
@@ -410,12 +447,16 @@ class APIServer(BaseHTTPRequestHandler):
                 None,
                 None,
                 False,
-                "horizontal",
+                1,
+                *lora_scales,
                 num_images=1,
                 low_ram=low_ram,
             )
         except Exception as exc:  # noqa: BLE001
             return _bad_request(self, f"ControlNet failed: {exc}", status=500)
+
+        if not images:
+            return _bad_request(self, info or "No images were generated successfully", status=500)
 
         encoded_images = [_encode_pil_to_base64(img) for img in images]
         response = {
@@ -650,9 +691,11 @@ class APIServer(BaseHTTPRequestHandler):
         }
         try:
             import mlx.core as mx
+            get_active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
+            get_peak = getattr(mx, "get_peak_memory", None) or mx.metal.get_peak_memory
             info["memory"] = {
-                "active_mb": round(mx.metal.get_active_memory() / 1e6, 2),
-                "peak_mb": round(mx.metal.get_peak_memory() / 1e6, 2),
+                "active_mb": round(get_active() / 1e6, 2),
+                "peak_mb": round(get_peak() / 1e6, 2),
             }
         except Exception:
             info["memory"] = None

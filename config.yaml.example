@@ -1,0 +1,107 @@
+# MFLUX API Server Configuration
+# Copy this file to config.yaml and customize as needed
+
+# Server Settings
+server:
+  # Host to bind to (0.0.0.0 allows external connections)
+  host: "0.0.0.0"
+  # Port to listen on
+  port: 7861
+  # CORS origins (use ["*"] to allow all origins)
+  cors_origins:
+    - "*"
+
+# Model Configuration
+models:
+  # Default model to use for generation
+  # Options: flux2-klein-4b, flux2-klein-9b, or any quantized variant
+  default: "flux2-klein-4b"
+
+  # Automatically download models if not found locally
+  auto_download: true
+
+  # Directory for caching downloaded models
+  cache_dir: "./models"
+
+  # Supported models (automatically available)
+  # - flux2-klein-4b (4B base model)
+  # - flux2-klein-4b-mlx-4bit (pre-quantized 4-bit)
+  # - flux2-klein-4b-mlx-8bit (pre-quantized 8-bit)
+  # - flux2-klein-4b-3-bit (runtime quantized)
+  # - flux2-klein-4b-4-bit (runtime quantized)
+  # - flux2-klein-4b-6-bit (runtime quantized)
+  # - flux2-klein-4b-8-bit (runtime quantized)
+  # - flux2-klein-9b (9B base model)
+  # - flux2-klein-9b-mlx-4bit (pre-quantized 4-bit)
+  # - flux2-klein-9b-mlx-8bit (pre-quantized 8-bit)
+  # - flux2-klein-9b-3-bit (runtime quantized)
+  # - flux2-klein-9b-4-bit (runtime quantized)
+  # - flux2-klein-9b-6-bit (runtime quantized)
+  # - flux2-klein-9b-8-bit (runtime quantized)
+
+# Generation Settings
+generation:
+  # Default number of inference steps
+  default_steps: 4
+
+  # Default guidance scale (fixed at 1.0 for Flux2)
+  default_guidance: 1.0
+
+  # Maximum number of images to generate in a single batch
+  max_batch_size: 4
+
+  # Directory for saving generated images
+  output_dir: "./output"
+
+  # Default image dimensions
+  default_width: 512
+  default_height: 512
+
+# API Settings
+api:
+  # Maximum number of concurrent generation jobs
+  max_concurrent_jobs: 2
+
+  # Time-to-live for job results in seconds (1 hour)
+  job_ttl_seconds: 3600
+
+  # Enable job queue management
+  enable_queue: true
+
+  # Maximum queue size (0 = unlimited)
+  max_queue_size: 10
+
+# LoRA Settings
+lora:
+  # Directory for storing LoRA files
+  lora_dir: "./lora"
+
+  # Maximum LoRA file size in MB
+  max_file_size_mb: 500
+
+  # Default LoRA scale
+  default_scale: 1.0
+
+# Logging
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # Enable verbose output
+  verbose: false
+
+# Performance
+performance:
+  # Enable low RAM mode (slower but uses less memory)
+  low_ram_mode: false
+
+  # Force cleanup after each generation
+  force_cleanup: true
+
+# Environment Variable Overrides
+# These settings can be overridden by environment variables:
+# - MFLUX_API_HOST -> server.host
+# - MFLUX_API_PORT -> server.port
+# - MFLUX_DEFAULT_MODEL -> models.default
+# - MFLUX_OUTPUT_DIR -> generation.output_dir
+# - MFLUX_MODELS_DIR -> models.cache_dir

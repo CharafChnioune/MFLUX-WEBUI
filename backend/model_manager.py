@@ -13,7 +13,7 @@ from backend.mflux_compat import ModelConfig as MfluxModelConfig
 # - gradiodocs/guides-controlling-layout/controlling_layout.md (Row/Column ordering)
 # - gradiodocs/guides-interface-state/interface_state.md (shared state between tabs)
 
-BASE_MODEL_CHOICES = ["schnell", "dev", "krea-dev"]
+BASE_MODEL_CHOICES = ["flux2-klein-4b", "flux2-klein-9b"]
 MODELS: Dict[str, "CustomModelConfig"] = {}
 
 
@@ -54,10 +54,6 @@ class CustomModelConfig:
 def _register_default_models():
     """Register official checkpoints plus quantized variants."""
     official = [
-        ("schnell", "AITRADER/MFLUXUI.1-schnell", 256, "schnell"),
-        ("dev", "AITRADER/MFLUXUI.1-dev", 512, "dev"),
-        ("krea-dev", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
-        ("dev-krea", "black-forest-labs/FLUX.1-Krea-dev", 512, "krea-dev"),
         ("flux2-klein-4b", "black-forest-labs/FLUX.2-klein-4B", 512, "flux2"),
         ("flux2-klein-4b-mlx-4bit", "AITRADER/FLUX2-klein-4B-mlx-4bit", 512, "flux2"),
         ("flux2-klein-4b-mlx-8bit", "AITRADER/FLUX2-klein-4B-mlx-8bit", 512, "flux2"),
@@ -115,28 +111,9 @@ def _flux2_ordered() -> List[str]:
     ]
 
 
-def get_updated_models(include_flux2: bool = False) -> List[str]:
+def get_updated_models(include_flux2: bool = True) -> List[str]:
     """Combine official aliases with any folders under models/."""
-    ordered = [
-        "schnell",
-        "schnell-3-bit",
-        "schnell-4-bit",
-        "schnell-6-bit",
-        "schnell-8-bit",
-        "dev",
-        "dev-3-bit",
-        "dev-4-bit",
-        "dev-6-bit",
-        "dev-8-bit",
-        "krea-dev",
-        "krea-dev-3-bit",
-        "krea-dev-4-bit",
-        "krea-dev-6-bit",
-        "krea-dev-8-bit",
-        "dev-krea",
-    ]
-    if include_flux2:
-        ordered.extend(_flux2_ordered())
+    ordered = _flux2_ordered()
     ordered.append("seedvr2")
     predefined = [alias for alias in ordered if alias in MODELS]
 

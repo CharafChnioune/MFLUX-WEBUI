@@ -7,12 +7,6 @@ import mlx.core as mx
 from PIL import Image
 from backend.mflux_compat import ModelConfig
 try:
-    from mflux.models.flux.variants.txt2img.flux import Flux1
-    from mflux.models.flux.variants.controlnet.flux_controlnet import Flux1Controlnet
-except ModuleNotFoundError:
-    from mflux.flux.flux import Flux1  # type: ignore
-    from mflux.controlnet.flux_controlnet import Flux1Controlnet  # type: ignore
-try:
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
     from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
 except ModuleNotFoundError:  # pragma: no cover - optional model support
@@ -38,6 +32,7 @@ import numpy as np
 import re
 from typing import Union, Tuple, Optional
 from backend.model_manager import (
+    get_custom_model_config,
     resolve_local_path,
     normalize_base_model_choice,
     resolve_mflux_model_config,
@@ -145,8 +140,21 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
     try:
         base_model = strip_quant_suffix(model)
         base_model_override = normalize_base_model_choice(base_model_override)
-        model_path = resolve_local_path(base_model)
-        model_config = resolve_mflux_model_config(base_model, base_model_override)
+        model_path: Optional[object] = resolve_local_path(base_model)
+
+        # Pre-quantized MLX repos use aliases like `flux2-klein-4b-mlx-4bit`.
+        # For these, the mflux loader needs a real HF repo id (org/model), not the alias.
+        config_name = base_model
+        if isinstance(base_model, str) and "-mlx-" in base_model:
+            config_name = base_model.split("-mlx-")[0]
+            try:
+                cfg = get_custom_model_config(base_model)
+                if getattr(cfg, "model_name", None) and "/" in str(cfg.model_name):
+                    model_path = str(cfg.model_name)
+            except Exception:
+                pass
+
+        model_config = resolve_mflux_model_config(config_name, base_model_override)
 
         if "-8-bit" in model:
             quantize = 8
@@ -199,55 +207,9 @@ def get_or_create_flux(model, config=None, image=None, lora_paths=None, lora_sca
                 )
             return flux
 
-        FluxClass = Flux1Controlnet if is_controlnet else Flux1
-        if is_controlnet:
-            if (base_model_override or base_model).startswith("schnell"):
-                model_config = ModelConfig.schnell_controlnet_canny()
-            else:
-                model_config = ModelConfig.dev_controlnet_canny()
-        elif base_model == "seedvr2":
-            try:
-                model_config = ModelConfig.seedvr2_3b()
-            except Exception:
-                model_config = getattr(ModelConfig, "seedvr2", lambda: None)()
-        print(f"Creating {FluxClass.__name__} with model_config={model_config}, quantize={quantize}, local_path={model_path}, lora_paths={lora_paths}, lora_scales={lora_scales}")
-        try:
-            # Special handling for lora_scales to work with mflux library's internals.
-            # mflux library does: flux_model.lora_scales = (lora_scales or []) + [1.0] * len(hf_lora_paths)
-            # So we need to pass lora_scales as a LIST instead of a tuple to allow this to work
-            
-            # If no lora paths, don't pass any scales
-            if not lora_paths:
-                lora_scales = None
-            # If lora paths but no scales, pass an empty list to allow concatenation
-            elif lora_scales is None:
-                lora_scales = []
-            # If lora paths and scales, ensure scales is a list
-            elif isinstance(lora_scales, tuple):
-                lora_scales = list(lora_scales)
-            
-            try:
-                flux = FluxClass(
-                    model_config=model_config,
-                    quantize=quantize,
-                    model_path=str(model_path) if model_path else None,
-                    lora_paths=lora_paths,
-                    lora_scales=lora_scales,
-                )
-            except TypeError:
-                flux = FluxClass(
-                    model_config=model_config,
-                    quantize=quantize,
-                    local_path=str(model_path) if model_path else None,
-                    lora_paths=lora_paths,
-                    lora_scales=lora_scales,
-                )
-            return flux
-        except Exception as e:
-            print(f"Error instantiating {FluxClass.__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
+        # Only Flux2 models are supported
+        print(f"Error: Model {base_model} is not a supported Flux2 model.")
+        return None
         
         # Opmerking: 'image' en 'low_ram' worden niet direct doorgegeven aan de Flux constructor
         # maar kunnen later in de workflow gebruikt worden
@@ -317,11 +279,14 @@ def clear_flux_cache():
 def force_mlx_cleanup():
     mx.eval(mx.zeros(1))
     
-    if hasattr(mx.metal, 'clear_cache'):
-        mx.metal.clear_cache()
+    # mlx.core deprecated mx.metal.* in favor of top-level helpers.
+    clear_cache = getattr(mx, "clear_cache", None) or getattr(mx.metal, "clear_cache", None)
+    if clear_cache:
+        clear_cache()
     
-    if hasattr(mx.metal, 'reset_peak_memory'):
-        mx.metal.reset_peak_memory()
+    reset_peak = getattr(mx, "reset_peak_memory", None) or getattr(mx.metal, "reset_peak_memory", None)
+    if reset_peak:
+        reset_peak()
 
     gc.collect()
 
@@ -330,8 +295,11 @@ def print_memory_usage(label):
     Print the current memory usage.
     """
     try:
-        active_memory = mx.metal.get_active_memory() / 1e6
-        peak_memory = mx.metal.get_peak_memory() / 1e6
+        # mlx.core deprecated mx.metal.get_*_memory in favor of mx.get_*_memory.
+        get_active = getattr(mx, "get_active_memory", None) or mx.metal.get_active_memory
+        get_peak = getattr(mx, "get_peak_memory", None) or mx.metal.get_peak_memory
+        active_memory = get_active() / 1e6
+        peak_memory = get_peak() / 1e6
         print(f"{label} - Active memory: {active_memory:.2f} MB, Peak memory: {peak_memory:.2f} MB")
     except Exception as e:
         print(f"Error getting memory usage: {str(e)}")
@@ -675,7 +643,7 @@ def generate_image_gradio(
                     progress_callback("stage", "loading_model")
                 flux = get_or_create_flux(
                     model=model,
-                    lora_paths=lora_files,
+                    lora_paths=lora_paths,
                     lora_scales=lora_scales_float,
                     low_ram=low_ram,
                     base_model_override=base_model
@@ -741,6 +709,7 @@ def generate_image_gradio(
                 }
                 
                 # Save the image with embedded metadata
+                os.makedirs(OUTPUT_DIR, exist_ok=True)
                 output_path = os.path.join(OUTPUT_DIR, filename)
                 save_image_with_metadata(pil_image, output_path, generation_metadata)
                 
