@@ -235,7 +235,7 @@ class Flux2Dev(nn.Module):
 
         tok = self._torch_tokenizer(
             prompt,
-            padding="max_length",
+            padding=False,
             truncation=True,
             max_length=max_sequence_length,
             return_tensors="pt",
