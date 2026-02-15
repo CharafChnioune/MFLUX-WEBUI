@@ -28,6 +28,7 @@ from mflux.models.common.latent_creator.latent_creator import LatentCreator
 from mflux.models.common.weights.loading.weight_applier import WeightApplier
 from mflux.models.common.weights.loading.weight_definition import ComponentDefinition
 from mflux.models.common.weights.loading.weight_loader import WeightLoader
+from mflux.models.common.weights.mapping.weight_mapping import WeightTarget
 from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator
 from mflux.models.flux2.model.flux2_text_encoder.prompt_encoder import Flux2PromptEncoder
 from mflux.models.flux2.model.flux2_transformer.transformer import Flux2Transformer
@@ -39,8 +40,45 @@ from mflux.utils.generated_image import GeneratedImage
 from mflux.utils.image_util import ImageUtil
 
 
+# Keep in sync with diffusers
+# https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/flux2/system_messages.py
+SYSTEM_MESSAGE = "You are an AI that reasons about image descriptions. You give structured responses focusing on object relationships, object attribution and actions without speculation."
+
+def _format_input(prompts: list[str], system_message: str = SYSTEM_MESSAGE):
+    # Mirror diffusers formatting for the FLUX.2-dev text encoder.
+    # Prompts are wrapped in a system+user conversation and tokenized via apply_chat_template.
+    cleaned = [p.replace('[IMG]', '') for p in prompts]
+    return [
+        [
+            {"role": "system", "content": [{"type": "text", "text": system_message}]},
+            {"role": "user", "content": [{"type": "text", "text": prompt}]},
+        ]
+        for prompt in cleaned
+    ]
+
+
 class Flux2DevWeightDefinition:
     """Only loads transformer + VAE from the diffusers-style FLUX.2-dev repo."""
+
+    @staticmethod
+    def get_transformer_mapping():
+        # FLUX.2-dev ships extra guidance embedder weights (guidance distillation).
+        # mflux's default Flux2 mapping targets the Klein models which have guidance_embeds
+        # disabled, so we extend it here.
+        mapping = list(Flux2WeightMapping.get_transformer_mapping())
+        mapping.extend(
+            [
+                WeightTarget(
+                    to_pattern="time_guidance_embed.guidance_linear_1.weight",
+                    from_pattern=["time_guidance_embed.guidance_embedder.linear_1.weight"],
+                ),
+                WeightTarget(
+                    to_pattern="time_guidance_embed.guidance_linear_2.weight",
+                    from_pattern=["time_guidance_embed.guidance_embedder.linear_2.weight"],
+                ),
+            ]
+        )
+        return mapping
 
     @staticmethod
     def get_components():
@@ -55,7 +93,7 @@ class Flux2DevWeightDefinition:
                 name="transformer",
                 hf_subdir="transformer",
                 precision=ModelConfig.precision,
-                mapping_getter=Flux2WeightMapping.get_transformer_mapping,
+                mapping_getter=Flux2DevWeightDefinition.get_transformer_mapping,
             ),
         ]
 
@@ -99,6 +137,7 @@ def _default_flux2_dev_model_config(model_name: str = "black-forest-labs/FLUX.2-
             "num_attention_heads": 48,
             "attention_head_dim": 128,
             "joint_attention_dim": 15360,
+            "guidance_embeds": True,
         },
         text_encoder_overrides={},
     )
@@ -229,28 +268,43 @@ class Flux2Dev(nn.Module):
         return (num_layers // 4, num_layers // 2, (3 * num_layers) // 4)
 
     def _encode_prompt(self, prompt: str, max_sequence_length: int = 512) -> tuple[mx.array, mx.array]:
+        """Encode a prompt into FLUX.2 prompt embeddings.
+
+        The FLUX.2-dev text encoder is chat-formatted (system+user messages) and expects
+        tokenization via `apply_chat_template` (see diffusers' Flux2Pipeline).
+        """
         self._ensure_torch_text_encoder()
 
         import torch
 
-        tok = self._torch_tokenizer(
-            prompt,
-            padding=False,
+        tok = self._torch_tokenizer
+        model = self._torch_text_encoder
+        assert tok is not None
+        assert model is not None
+
+        # Mirror diffusers' `format_input` + `apply_chat_template` behavior.
+        messages_batch = _format_input(prompts=[prompt], system_message=SYSTEM_MESSAGE)
+        inputs = tok.apply_chat_template(
+            messages_batch,
+            add_generation_prompt=False,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            padding="max_length",
             truncation=True,
             max_length=max_sequence_length,
-            return_tensors="pt",
         )
 
-        model = self._torch_text_encoder
-        assert model is not None
+        input_ids = inputs["input_ids"].to(model.device)
+        attention_mask = inputs["attention_mask"].to(model.device)
 
         with torch.no_grad():
             outputs = model(
-                input_ids=tok["input_ids"].to(model.device),
-                attention_mask=tok.get("attention_mask").to(model.device) if tok.get("attention_mask") is not None else None,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
                 output_hidden_states=True,
-                return_dict=True,
                 use_cache=False,
+                return_dict=True,
             )
 
         hidden_states = outputs.hidden_states
@@ -264,9 +318,12 @@ class Flux2Dev(nn.Module):
         prompt_embeds = stacked.permute(0, 2, 1, 3).reshape(b, s, n * h)
 
         # Convert to MLX.
+        # NumPy does not support bfloat16; cast to float32 before converting.
+        prompt_embeds = prompt_embeds.to(dtype=torch.float32)
         prompt_mx = mx.array(prompt_embeds.cpu().numpy()).astype(ModelConfig.precision)
         text_ids = Flux2PromptEncoder.prepare_text_ids(prompt_mx)
         return prompt_mx, text_ids
+
 
     def _encode_prompt_pair(
         self,
@@ -307,7 +364,7 @@ class Flux2Dev(nn.Module):
 
         prompt_embeds, text_ids, negative_prompt_embeds, negative_text_ids = self._encode_prompt_pair(
             prompt=prompt,
-            negative_prompt=" ",
+            negative_prompt=None,
             guidance=guidance,
         )
 
@@ -449,7 +506,7 @@ class Flux2Dev(nn.Module):
                 timestep=timestep,
                 img_ids=latent_ids,
                 txt_ids=text_ids,
-                guidance=None,
+                guidance=guidance,
             )
             if negative_prompt_embeds is not None and negative_text_ids is not None:
                 negative_noise = transformer(
@@ -458,11 +515,11 @@ class Flux2Dev(nn.Module):
                     timestep=timestep,
                     img_ids=latent_ids,
                     txt_ids=negative_text_ids,
-                    guidance=None,
+                    guidance=guidance,
                 )
                 noise = negative_noise + guidance * (noise - negative_noise)
             return noise
 
-        if AppleSiliconUtil.is_m1_or_m2():
-            return predict
-        return mx.compile(predict)
+        # Avoid mx.compile for FLUX.2-dev: the compiled graph can trigger Metal GPU timeouts on
+        # large models. The uncompiled path is slower but more reliable.
+        return predict
