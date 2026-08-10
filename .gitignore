@@ -8,6 +8,8 @@ __pycache__
 build/
 dist/
 *.egg-info/
+frontend/node_modules/
+frontend/dist/
 
 *.log
 *.tmp
