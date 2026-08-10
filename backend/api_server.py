@@ -14,6 +14,7 @@ Endpoints:
 - GET  /api/v1/models
 - GET  /api/v1/photo-imports/config
 - POST /api/v1/photo-imports/inventory
+- POST /api/v1/photo-batches/plan
 - GET  /api/v1/system
 - GET  /api/v1/queue
 - GET  /api/v1/stats
@@ -222,7 +223,7 @@ class APIServer(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         path = urlparse(self.path).path
-        if path.startswith("/api/v1/photo-imports"):
+        if path.startswith(("/api/v1/photo-imports", "/api/v1/photo-batches")):
             if not _photo_import_access_allowed(self):
                 return _photo_json_response(self, {"error": "Local access only."}, status=403)
             self.send_response(204)
@@ -325,6 +326,8 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_generate()
         if path == "/api/v1/photo-imports/inventory":
             return self.handle_photo_import_inventory()
+        if path == "/api/v1/photo-batches/plan":
+            return self.handle_photo_batch_plan()
 
         return _bad_request(self, "Unknown endpoint", status=404)
 
@@ -660,6 +663,14 @@ class APIServer(BaseHTTPRequestHandler):
                 ).to_dict()
             }, status=400)
 
+        if not isinstance(data, dict):
+            return _json_response(self, {
+                "error": APIError(
+                    code=APIError.INVALID_JSON,
+                    message="JSON body must be an object.",
+                ).to_dict()
+            }, status=400)
+
         raw_type = data.get("type", "txt2img")
         try:
             job_type = JobType(raw_type)
@@ -680,13 +691,34 @@ class APIServer(BaseHTTPRequestHandler):
                 ).to_dict()
             }, status=400)
 
+        response = _json_response
+        if job_type == JobType.photo_batch:
+            if not _photo_import_access_allowed(self):
+                return _photo_json_response(self, {"error": "Local access only."}, status=403)
+            from backend.photo_batch import PhotoBatchValidationError, prepare_photo_batch
+
+            try:
+                plan = prepare_photo_batch(data)
+            except (PhotoBatchValidationError, ValueError) as exc:
+                return _photo_json_response(self, {"error": str(exc)}, status=400)
+            data = dict(data)
+            data["_photo_batch_plan"] = plan
+            data["num_images"] = plan["num_images"]
+            response = _photo_json_response
+
         mgr = get_job_manager()
         job = mgr.submit_job(job_type, data)
-        return _json_response(self, {
+        payload = {
             "job_id": job.id,
             "status": job.status.value,
             "type": job.job_type.value,
-        }, status=202)
+        }
+        if job_type == JobType.photo_batch:
+            payload.update({
+                "batch_id": plan["batch_id"],
+                "output_relative_directory": plan["output_relative_directory"],
+            })
+        return response(self, payload, status=202)
 
     def handle_get_job(self, job_id: str):
         """GET /api/v1/jobs/{id} - get job status."""
@@ -702,7 +734,10 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
-        return _json_response(self, job.to_dict())
+        if job.job_type.value == "photo_batch" and not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+        responder = _photo_json_response if job.job_type.value == "photo_batch" else _json_response
+        return responder(self, job.to_dict())
 
     def handle_job_stream(self, job_id: str):
         """GET /api/v1/jobs/{id}/stream - SSE event stream."""
@@ -719,6 +754,8 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
+        if job.job_type.value == "photo_batch" and not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
         stream_job_events(self, job)
 
     def handle_cancel_job(self, job_id: str):
@@ -727,6 +764,10 @@ class APIServer(BaseHTTPRequestHandler):
         from backend.job_manager import get_job_manager
 
         mgr = get_job_manager()
+        existing = mgr.get_job(job_id)
+        if existing is not None and existing.job_type.value == "photo_batch":
+            if not _photo_import_access_allowed(self):
+                return _photo_json_response(self, {"error": "Local access only."}, status=403)
         job = mgr.cancel_job(job_id)
         if job is None:
             return _json_response(self, {
@@ -735,7 +776,8 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
-        return _json_response(self, {
+        responder = _photo_json_response if job.job_type.value == "photo_batch" else _json_response
+        return responder(self, {
             "job_id": job.id,
             "status": job.status.value,
         })
@@ -746,6 +788,8 @@ class APIServer(BaseHTTPRequestHandler):
 
         mgr = get_job_manager()
         jobs = mgr.list_jobs()
+        if not _photo_import_access_allowed(self):
+            jobs = [job for job in jobs if job.job_type.value != "photo_batch"]
         return _json_response(self, {
             "jobs": [j.to_dict() for j in jobs],
         })
@@ -786,6 +830,26 @@ class APIServer(BaseHTTPRequestHandler):
                 location_overrides=data.get("location_overrides"),
             )
         except (PhotoImportValidationError, ValueError) as exc:
+            return _photo_json_response(self, {"error": str(exc)}, status=400)
+        return _photo_json_response(self, result)
+
+    def handle_photo_batch_plan(self):
+        """Validate and preview a deterministic local SeedVR2 batch."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.photo_batch import (
+            PhotoBatchValidationError,
+            prepare_photo_batch,
+            public_photo_batch_plan,
+        )
+
+        try:
+            data = self._read_json()
+            if not isinstance(data, dict):
+                raise PhotoBatchValidationError("JSON body must be an object.")
+            result = public_photo_batch_plan(prepare_photo_batch(data))
+        except (PhotoBatchValidationError, ValueError) as exc:
             return _photo_json_response(self, {"error": str(exc)}, status=400)
         return _photo_json_response(self, result)
 
@@ -840,6 +904,8 @@ class APIServer(BaseHTTPRequestHandler):
 
         mgr = get_job_manager()
         jobs = mgr.list_jobs()
+        if not _photo_import_access_allowed(self):
+            jobs = [job for job in jobs if job.job_type.value != "photo_batch"]
         pending = [j.to_dict() for j in jobs if j.status == JobStatus.queued]
         running = [j.to_dict() for j in jobs if j.status == JobStatus.running]
         return _json_response(self, {

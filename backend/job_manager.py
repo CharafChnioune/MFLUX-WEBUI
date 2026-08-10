@@ -202,6 +202,8 @@ class JobManager:
             self._run_controlnet(job, params, progress_callback)
         elif job_type == JobType.upscale:
             self._run_upscale(job, params, progress_callback)
+        elif job_type == JobType.photo_batch:
+            self._run_photo_batch(job, params, progress_callback)
         else:
             raise ValueError(f"Unknown job type: {job_type}")
 
@@ -343,6 +345,33 @@ class JobManager:
             raise RuntimeError(status or "Upscale failed")
 
         self._finalize_job(job, [upscaled], status or "", "")
+
+    def _run_photo_batch(self, job: Job, params: dict, progress_callback):
+        """Run a server-created local photo plan without exposing source metadata."""
+        from backend.photo_batch import run_photo_batch
+
+        plan = params.get("_photo_batch_plan")
+        if not isinstance(plan, dict):
+            raise ValueError("A server-created photo batch plan is required.")
+
+        result = run_photo_batch(
+            plan,
+            progress_callback=progress_callback,
+            cancel_check=lambda: job.status == JobStatus.cancelled,
+        )
+        job.result = result
+        if job.status == JobStatus.cancelled or result.get("status") == "cancelled":
+            job.status = JobStatus.cancelled
+            job.completed_at = job.completed_at or time.time()
+            job.notify("result", result)
+            return
+
+        job.progress.percent = 100.0
+        job.progress.stage = result.get("status", "completed")
+        job.status = JobStatus.completed
+        job.completed_at = time.time()
+        job.notify("status", {"job_id": job.id, "status": job.status.value})
+        job.notify("result", result)
 
     def _finalize_job(self, job: Job, images, info, used_prompt):
         encoded_images = []

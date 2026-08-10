@@ -156,7 +156,7 @@ def inventory_photos(
             continue
 
         try:
-            with _open_regular_source(import_root, root_relative_path) as (source, stat):
+            with open_import_source(import_root, root_relative_path) as (source, stat):
                 try:
                     extracted = extract_photo_metadata(
                         source,
@@ -178,10 +178,9 @@ def inventory_photos(
             used_overrides.add(root_relative_path)
         location_candidate = _location_candidate(gps, override, gps_mode)
 
-        identity = f"{root_relative_path}\0{stat.st_size}\0{stat.st_mtime_ns}"
         items.append(
             {
-                "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20],
+                "id": photo_source_id(root_relative_path, stat),
                 "name": source_path.name,
                 "relative_path": relative_path,
                 "root_relative_path": root_relative_path,
@@ -311,8 +310,25 @@ def _iter_files(directory: Path, *, recursive: bool):
             yield current_path / filename
 
 
+def photo_source_id(root_relative_path: str, stat: os.stat_result) -> str:
+    """Stable snapshot ID used to detect source changes between plan and run."""
+    normalized = _normalize_relative_path(root_relative_path)
+    identity = "\0".join(
+        str(value)
+        for value in (
+            normalized,
+            stat.st_size,
+            stat.st_mtime_ns,
+            getattr(stat, "st_ctime_ns", 0),
+            getattr(stat, "st_dev", 0),
+            getattr(stat, "st_ino", 0),
+        )
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+
+
 @contextmanager
-def _open_regular_source(import_root: Path, root_relative_path: str):
+def open_import_source(import_root: Path, root_relative_path: str):
     """Open one source read-only without following any path component symlink."""
     relative = PurePosixPath(_normalize_relative_path(root_relative_path))
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -565,4 +581,4 @@ def _register_optional_heif_opener() -> None:
         from pillow_heif import register_heif_opener
     except ImportError:
         return
-    register_heif_opener()
+    register_heif_opener(thumbnails=False)

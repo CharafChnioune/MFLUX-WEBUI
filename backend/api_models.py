@@ -24,6 +24,7 @@ class JobType(str, Enum):
     img2img = "img2img"
     controlnet = "controlnet"
     upscale = "upscale"
+    photo_batch = "photo_batch"
 
 
 @dataclass

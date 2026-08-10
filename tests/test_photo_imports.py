@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.api_server import APIServer
+from backend.api_models import Job, JobStatus, JobType
 from backend.photo_imports import (
     PhotoImportValidationError,
     _gps_to_decimal,
@@ -273,6 +274,37 @@ class PhotoImportAPITest(unittest.TestCase):
         )
         self.assertEqual(status, 403)
 
+    def test_photo_batch_plan_and_submission_are_local_and_server_created(self):
+        status, _, plan = self.request(
+            "POST",
+            "/api/v1/photo-batches/plan",
+            {"directory": "album", "gps_mode": "disabled"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(plan["num_images"], 1)
+        self.assertTrue(plan["originals_preserved"])
+        self.assertFalse(plan["external_services_used"])
+        self.assertNotIn(str(self.root), json.dumps(plan))
+
+        class FakeManager:
+            submitted = None
+
+            def submit_job(self, job_type, params):
+                self.submitted = (job_type, params)
+                return Job(job_type=job_type, status=JobStatus.queued, params=params)
+
+        manager = FakeManager()
+        with patch("backend.job_manager.get_job_manager", return_value=manager):
+            status, _, submitted = self.request(
+                "POST",
+                "/api/v1/generate",
+                {"type": "photo_batch", "directory": "album", "gps_mode": "disabled"},
+            )
+        self.assertEqual(status, 202)
+        self.assertEqual(submitted["type"], "photo_batch")
+        self.assertEqual(manager.submitted[0], JobType.photo_batch)
+        self.assertIn("_photo_batch_plan", manager.submitted[1])
+        self.assertEqual(manager.submitted[1]["num_images"], 1)
 
 if __name__ == "__main__":
     unittest.main()
