@@ -24,6 +24,12 @@ from backend.log_capture import JobLogCapture
 _JOB_TTL = 3600  # 1 hour
 _MAX_COMPLETED = 100
 _CLEANUP_INTERVAL = 300  # 5 minutes
+_MEDIA_GENERATION_LOCK = threading.Lock()
+
+
+def get_media_generation_lock() -> threading.Lock:
+    """Return the process-wide lock shared by async and legacy media endpoints."""
+    return _MEDIA_GENERATION_LOCK
 
 
 class JobManager:
@@ -31,7 +37,7 @@ class JobManager:
         self._jobs: Dict[str, Job] = {}
         self._queue: collections.deque = collections.deque()
         self._lock = threading.Lock()
-        self._generation_lock = threading.Lock()
+        self._generation_lock = get_media_generation_lock()
         self._queue_event = threading.Event()
 
         self._worker_thread = threading.Thread(
@@ -72,10 +78,11 @@ class JobManager:
         job = self.get_job(job_id)
         if job is None:
             return None
-        if job.status in (JobStatus.completed, JobStatus.failed, JobStatus.cancelled):
-            return job
-        job.status = JobStatus.cancelled
-        job.completed_at = time.time()
+        with job._lock:
+            if job.status in (JobStatus.completed, JobStatus.failed, JobStatus.cancelled):
+                return job
+            job.status = JobStatus.cancelled
+            job.completed_at = time.time()
         job.notify("status", {"job_id": job.id, "status": job.status.value})
         job.notify("error", {"code": "CANCELLED", "message": "Job was cancelled"})
         # Signal workflow to stop
@@ -85,6 +92,13 @@ class JobManager:
             workflow.request_cancel(job_id)
         except Exception:
             pass
+        if job.job_type == JobType.video:
+            try:
+                from backend.video_runner import request_video_cancel
+
+                request_video_cancel(job_id)
+            except Exception:
+                pass
         return job
 
     def queue_depth(self) -> int:
@@ -107,13 +121,16 @@ class JobManager:
                 if job_id is None:
                     break
                 job = self.get_job(job_id)
-                if job is None or job.status == JobStatus.cancelled:
+                if job is None:
                     continue
                 self._execute_job(job)
 
     def _execute_job(self, job: Job):
-        job.status = JobStatus.running
-        job.started_at = time.time()
+        with job._lock:
+            if job.status != JobStatus.queued:
+                return
+            job.status = JobStatus.running
+            job.started_at = time.time()
         job.notify("status", {"job_id": job.id, "status": job.status.value})
 
         def on_log_line(entry: dict):
@@ -165,6 +182,21 @@ class JobManager:
                     "level": "error",
                     "message": f"Image error: {msg}",
                 })
+            elif event == "video_progress" and isinstance(data, dict):
+                job.progress.current_image = 1
+                job.progress.total_images = 1
+                if isinstance(data.get("percent"), (int, float)):
+                    job.progress.percent = max(0.0, min(100.0, float(data["percent"])))
+                if isinstance(data.get("stage"), str):
+                    job.progress.stage = data["stage"]
+                job.notify("progress", {
+                    "current_image": job.progress.current_image,
+                    "total_images": job.progress.total_images,
+                    "percent": job.progress.percent,
+                    "stage": job.progress.stage,
+                    "current_step": data.get("current_step"),
+                    "total_steps": data.get("total_steps"),
+                })
 
         with self._generation_lock:
             try:
@@ -173,6 +205,9 @@ class JobManager:
                         return
                     self._dispatch(job, progress_callback)
             except Exception as exc:
+                if job.status == JobStatus.cancelled:
+                    job.completed_at = job.completed_at or time.time()
+                    return
                 tb = traceback.format_exc()
                 error_code = APIError.GENERATION_FAILED
                 if "memory" in str(exc).lower():
@@ -204,6 +239,8 @@ class JobManager:
             self._run_upscale(job, params, progress_callback)
         elif job_type == JobType.photo_batch:
             self._run_photo_batch(job, params, progress_callback)
+        elif job_type == JobType.video:
+            self._run_video(job, params, progress_callback)
         else:
             raise ValueError(f"Unknown job type: {job_type}")
 
@@ -370,6 +407,46 @@ class JobManager:
         job.progress.stage = result.get("status", "completed")
         job.status = JobStatus.completed
         job.completed_at = time.time()
+        job.notify("status", {"job_id": job.id, "status": job.status.value})
+        job.notify("result", result)
+
+    def _run_video(self, job: Job, params: dict, progress_callback):
+        """Run one validated local video plan in the isolated MLX subprocess."""
+        from backend.video_runner import discard_video_job_output, run_video_job
+
+        plan = params.get("_video_plan")
+        if not isinstance(plan, dict):
+            raise ValueError("A server-created video plan is required.")
+
+        result = run_video_job(
+            plan,
+            job_id=job.id,
+            progress_callback=progress_callback,
+            cancel_check=lambda: job.status == JobStatus.cancelled,
+        )
+        with job._lock:
+            cancelled = (
+                job.status == JobStatus.cancelled
+                or result.get("status") == "cancelled"
+            )
+            if cancelled:
+                job.status = JobStatus.cancelled
+                job.completed_at = job.completed_at or time.time()
+            else:
+                job.progress.current_image = 1
+                job.progress.total_images = 1
+                job.progress.percent = 100.0
+                job.progress.stage = "completed"
+                job.status = JobStatus.completed
+                job.completed_at = time.time()
+        if cancelled:
+            if result.get("status") == "completed":
+                result = discard_video_job_output(job.id)
+            job.result = result
+            job.notify("result", result)
+            return
+
+        job.result = result
         job.notify("status", {"job_id": job.id, "status": job.status.value})
         job.notify("result", result)
 

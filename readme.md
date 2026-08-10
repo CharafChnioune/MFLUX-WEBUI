@@ -16,8 +16,8 @@ pretending every backend works the same way.
 | Local photo API | Available | Async image jobs, job history and SSE progress through the existing API |
 | Photo import | Available | Local inventory with EXIF/GPS discovery, explicit privacy modes and manual location overrides |
 | SeedVR2 restoration batches | Available | Folder planning, safe outputs, progress and original-file preservation |
-| React studio | Buildable preview | Premium dark interface for Home, Images, Video, Restore, Time Lens, Library, Models, Activity and Settings |
-| MLX video | Integration preview | Audited capability shell only; no video runner, model download or generation is enabled yet |
+| React studio | Available | Premium dark interface for Home, Images, Video, Restore, Time Lens, Library, Models, Activity and Settings |
+| MLX video | One verified mode | Local Wan 2.1 1.3B text-to-video through an isolated, pinned runner |
 
 The source checkout and an installed Pinokio application are separate. Updating this
 repository does not restart or mutate an already-running restoration job.
@@ -51,23 +51,20 @@ Highlights:
 - local photo inventory with HEIF support and privacy-aware GPS suggestions;
 - model-specific settings rather than a single unsafe universal form.
 
-## Video: audited, not overclaimed
+## Video: one verified local path
 
-The interface now contains an MLX video workflow preview based on a concrete audit of
-[`Blaizzy/mlx-video`](https://github.com/Blaizzy/mlx-video). The upstream project
-contains LTX-2/2.3 and Wan 2.1/2.2 generation code, but it does not provide the web/job
-API required by this product and its dependency graph must not be mixed into the photo
-environment.
+The video workflow uses a pinned, isolated
+[`Blaizzy/mlx-video`](https://github.com/Blaizzy/mlx-video) subprocess. Only the exact
+Wan 2.1 1.3B text-to-video profile that passed a local Apple-silicon smoke test is
+exposed. Its dependencies do not enter the MFLUX photo environment.
 
 Therefore:
 
-- the video submit action is disabled;
-- no video model is downloaded automatically;
-- the model cards show preview/setup state and license cautions;
-- the proposed backend reuses the existing serialized job queue through a separate,
-  pinned subprocess environment;
-- a capability will only become available after an exact checkpoint passes a local
-  Apple-silicon smoke test.
+- the server owns the capability limits, runtime state and safe model paths;
+- jobs share the existing serialized media queue and expose real progress/cancellation;
+- completed MP4s and provenance remain local and are validated before publication;
+- unsupported LTX, Wan 2.2, conditioning, audio and arbitrary-size modes stay hidden;
+- setup is explicit and reproducible; the frontend never silently downloads a model.
 
 Read the full [MLX video integration audit](docs/MLX_VIDEO_INTEGRATION.md).
 
@@ -122,8 +119,8 @@ npm install
 npm run dev
 ```
 
-The React app is currently a product shell. It demonstrates validated forms, privacy
-controls and readiness states; not every visible photo action is wired to the API yet.
+The React app is capability-driven. Restore and the verified video mode use the local
+API; unfinished surfaces such as Time Lens stay visibly unavailable.
 
 Production build:
 
@@ -143,14 +140,14 @@ npm run build
 - `GET /api/v1/photo-imports/config` — local import policy
 - `POST /api/v1/photo-imports/inventory` — metadata/privacy-aware inventory
 - `POST /api/v1/photo-batches/plan` — safe SeedVR2 batch plan
-
-Video capability/status routes documented in the integration audit are proposed and are
-not served yet.
+- `GET /api/v1/video/capabilities` — exact supported local video mode and limits
+- `GET /api/v1/video/status` — isolated runtime, model and queue readiness
+- `GET /api/v1/video/artifacts/{id}/{file}` — validated local MP4 and provenance
 
 ## Development checks
 
 ```bash
-python -m pytest -q tests/test_api_health.py tests/test_photo_imports.py tests/test_photo_batch.py
+python -m unittest discover -s tests -v
 cd frontend && npm run build
 ```
 
@@ -175,7 +172,7 @@ Core upstream projects include:
 
 - [MFLUX](https://github.com/mflux-community/mflux)
 - [MLX](https://github.com/ml-explore/mlx)
-- [Blaizzy/mlx-video](https://github.com/Blaizzy/mlx-video) — audited future video engine; not yet installed by MLX Media
+- [Blaizzy/mlx-video](https://github.com/Blaizzy/mlx-video) — pinned, isolated video engine for the verified Wan profile
 - [Pinokio](https://pinokio.computer)
 
 ## Safety note

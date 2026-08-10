@@ -15,6 +15,8 @@ Endpoints:
 - GET  /api/v1/photo-imports/config
 - POST /api/v1/photo-imports/inventory
 - POST /api/v1/photo-batches/plan
+- GET  /api/v1/video/capabilities
+- GET  /api/v1/video/status
 - GET  /api/v1/system
 - GET  /api/v1/queue
 - GET  /api/v1/stats
@@ -42,10 +44,15 @@ PORT = 7861
 DEFAULT_MODEL = "flux2-klein-4b"
 _CURRENT_MODEL = None
 WEBUI_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+_MAX_JSON_BODY_BYTES = 64 * 1024 * 1024
 
 # Regex patterns for path-parameter routes
 _RE_JOB_STREAM = re.compile(r"^/api/v1/jobs/([a-f0-9]+)/stream$")
 _RE_JOB_DETAIL = re.compile(r"^/api/v1/jobs/([a-f0-9]+)$")
+_RE_VIDEO_ARTIFACT = re.compile(
+    r"^/api/v1/video/artifacts/([a-f0-9]+)/([A-Za-z0-9][A-Za-z0-9._-]*)$"
+)
+_RE_BYTE_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
 def _current_model():
@@ -223,7 +230,7 @@ class APIServer(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         path = urlparse(self.path).path
-        if path.startswith(("/api/v1/photo-imports", "/api/v1/photo-batches")):
+        if path.startswith(("/api/v1/photo-imports", "/api/v1/photo-batches", "/api/v1/video")):
             if not _photo_import_access_allowed(self):
                 return _photo_json_response(self, {"error": "Local access only."}, status=403)
             self.send_response(204)
@@ -265,6 +272,10 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_v1_models()
         if path == "/api/v1/photo-imports/config":
             return self.handle_photo_import_config()
+        if path == "/api/v1/video/capabilities":
+            return self.handle_video_capabilities()
+        if path == "/api/v1/video/status":
+            return self.handle_video_status()
         if path == "/api/v1/system":
             return self.handle_system()
         if path == "/api/v1/providers/nativ":
@@ -283,6 +294,9 @@ class APIServer(BaseHTTPRequestHandler):
         m = _RE_JOB_DETAIL.match(path)
         if m:
             return self.handle_get_job(m.group(1))
+        m = _RE_VIDEO_ARTIFACT.match(path)
+        if m:
+            return self.handle_video_artifact(m.group(1), m.group(2))
 
         return _bad_request(self, "Unknown endpoint", status=404)
 
@@ -312,14 +326,18 @@ class APIServer(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path == "/sdapi/v1/txt2img":
-            return self.handle_txt2img()
-        if path == "/sdapi/v1/img2img":
-            return self.handle_img2img()
-        if path == "/sdapi/v1/controlnet":
-            return self.handle_controlnet()
-        if path == "/api/upscale":
-            return self.handle_upscale()
+        legacy_media_handlers = {
+            "/sdapi/v1/txt2img": self.handle_txt2img,
+            "/sdapi/v1/img2img": self.handle_img2img,
+            "/sdapi/v1/controlnet": self.handle_controlnet,
+            "/api/upscale": self.handle_upscale,
+        }
+        legacy_handler = legacy_media_handlers.get(path)
+        if legacy_handler is not None:
+            from backend.job_manager import get_media_generation_lock
+
+            with get_media_generation_lock():
+                return legacy_handler()
         if path == "/sdapi/v1/options":
             return self.handle_options_update()
         if path == "/api/v1/generate":
@@ -345,6 +363,8 @@ class APIServer(BaseHTTPRequestHandler):
     def _read_json(self):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
+            if content_length < 0 or content_length > _MAX_JSON_BODY_BYTES:
+                raise ValueError("JSON request body is too large")
             body = self.rfile.read(content_length) if content_length > 0 else b"{}"
             return json.loads(body.decode("utf-8"))
         except Exception as exc:  # noqa: BLE001
@@ -705,6 +725,19 @@ class APIServer(BaseHTTPRequestHandler):
             data["_photo_batch_plan"] = plan
             data["num_images"] = plan["num_images"]
             response = _photo_json_response
+        elif job_type == JobType.video:
+            if not _photo_import_access_allowed(self):
+                return _photo_json_response(self, {"error": "Local access only."}, status=403)
+            from backend.video_runner import VideoValidationError, prepare_video_request
+
+            try:
+                plan = prepare_video_request(data)
+            except (VideoValidationError, ValueError) as exc:
+                return _photo_json_response(self, {"error": str(exc)}, status=400)
+            data = dict(data)
+            data["_video_plan"] = plan
+            data["num_images"] = 1
+            response = _photo_json_response
 
         mgr = get_job_manager()
         job = mgr.submit_job(job_type, data)
@@ -717,6 +750,11 @@ class APIServer(BaseHTTPRequestHandler):
             payload.update({
                 "batch_id": plan["batch_id"],
                 "output_relative_directory": plan["output_relative_directory"],
+            })
+        elif job_type == JobType.video:
+            payload.update({
+                "capability_id": plan["capability_id"],
+                "operation": plan["operation"],
             })
         return response(self, payload, status=202)
 
@@ -734,9 +772,9 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
-        if job.job_type.value == "photo_batch" and not _photo_import_access_allowed(self):
+        if job.job_type.value in {"photo_batch", "video"} and not _photo_import_access_allowed(self):
             return _photo_json_response(self, {"error": "Local access only."}, status=403)
-        responder = _photo_json_response if job.job_type.value == "photo_batch" else _json_response
+        responder = _photo_json_response if job.job_type.value in {"photo_batch", "video"} else _json_response
         return responder(self, job.to_dict())
 
     def handle_job_stream(self, job_id: str):
@@ -754,7 +792,7 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
-        if job.job_type.value == "photo_batch" and not _photo_import_access_allowed(self):
+        if job.job_type.value in {"photo_batch", "video"} and not _photo_import_access_allowed(self):
             return _photo_json_response(self, {"error": "Local access only."}, status=403)
         stream_job_events(self, job)
 
@@ -765,7 +803,7 @@ class APIServer(BaseHTTPRequestHandler):
 
         mgr = get_job_manager()
         existing = mgr.get_job(job_id)
-        if existing is not None and existing.job_type.value == "photo_batch":
+        if existing is not None and existing.job_type.value in {"photo_batch", "video"}:
             if not _photo_import_access_allowed(self):
                 return _photo_json_response(self, {"error": "Local access only."}, status=403)
         job = mgr.cancel_job(job_id)
@@ -776,7 +814,7 @@ class APIServer(BaseHTTPRequestHandler):
                     message=f"Job {job_id} not found",
                 ).to_dict()
             }, status=404)
-        responder = _photo_json_response if job.job_type.value == "photo_batch" else _json_response
+        responder = _photo_json_response if job.job_type.value in {"photo_batch", "video"} else _json_response
         return responder(self, {
             "job_id": job.id,
             "status": job.status.value,
@@ -789,7 +827,7 @@ class APIServer(BaseHTTPRequestHandler):
         mgr = get_job_manager()
         jobs = mgr.list_jobs()
         if not _photo_import_access_allowed(self):
-            jobs = [job for job in jobs if job.job_type.value != "photo_batch"]
+            jobs = [job for job in jobs if job.job_type.value not in {"photo_batch", "video"}]
         return _json_response(self, {
             "jobs": [j.to_dict() for j in jobs],
         })
@@ -853,6 +891,106 @@ class APIServer(BaseHTTPRequestHandler):
             return _photo_json_response(self, {"error": str(exc)}, status=400)
         return _photo_json_response(self, result)
 
+    def handle_video_capabilities(self):
+        """GET the exact locally-supported video capability registry."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.video_runner import get_video_capabilities
+
+        return _photo_json_response(self, get_video_capabilities())
+
+    def handle_video_status(self):
+        """GET isolated video runner readiness and the active serialized media job."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.api_models import JobStatus
+        from backend.job_manager import get_job_manager
+        from backend.video_runner import get_video_runtime_status
+
+        active = next(
+            (
+                {"id": job.id, "type": job.job_type.value}
+                for job in get_job_manager().list_jobs()
+                if job.status == JobStatus.running
+                and job.job_type.value in {"photo_batch", "video"}
+            ),
+            None,
+        )
+        return _photo_json_response(self, get_video_runtime_status(active_media_job=active))
+
+    def handle_video_artifact(self, job_id: str, filename: str):
+        """Serve one validated local video artifact without exposing filesystem paths."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.video_runner import VideoValidationError, resolve_video_artifact
+
+        try:
+            artifact = resolve_video_artifact(job_id, filename)
+            size = artifact.stat().st_size
+        except (VideoValidationError, FileNotFoundError, OSError) as exc:
+            return _photo_json_response(self, {"error": str(exc)}, status=404)
+
+        content_type, _ = mimetypes.guess_type(artifact.name)
+        start = 0
+        end = size - 1
+        response_status = 200
+        requested_range = self.headers.get("Range")
+        if requested_range:
+            match = _RE_BYTE_RANGE.fullmatch(requested_range.strip())
+            if not match or "," in requested_range:
+                return self._video_range_not_satisfiable(size)
+            first, last = match.groups()
+            if not first and not last:
+                return self._video_range_not_satisfiable(size)
+            try:
+                if not first:
+                    suffix_length = int(last)
+                    if suffix_length <= 0:
+                        return self._video_range_not_satisfiable(size)
+                    start = max(0, size - suffix_length)
+                else:
+                    start = int(first)
+                    if last:
+                        end = min(int(last), size - 1)
+                if start < 0 or start >= size or end < start:
+                    return self._video_range_not_satisfiable(size)
+            except ValueError:
+                return self._video_range_not_satisfiable(size)
+            response_status = 206
+
+        content_length = end - start + 1
+        try:
+            self.send_response(response_status)
+            self.send_header("Content-Type", content_type or "application/octet-stream")
+            self.send_header("Content-Length", str(content_length))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Accept-Ranges", "bytes")
+            if response_status == 206:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            origin = self.headers.get("Origin")
+            if origin and _photo_import_access_allowed(self):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            with artifact.open("rb") as source:
+                source.seek(start)
+                remaining = content_length
+                while remaining > 0 and (chunk := source.read(min(1024 * 1024, remaining))):
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, OSError):
+            pass
+
+    def _video_range_not_satisfiable(self, size: int):
+        self.send_response(416)
+        self.send_header("Content-Range", f"bytes */{size}")
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def handle_v1_models(self):
         """GET /api/v1/models - models with capabilities."""
         from backend.model_manager import get_custom_model_config, get_updated_models
@@ -905,7 +1043,7 @@ class APIServer(BaseHTTPRequestHandler):
         mgr = get_job_manager()
         jobs = mgr.list_jobs()
         if not _photo_import_access_allowed(self):
-            jobs = [job for job in jobs if job.job_type.value != "photo_batch"]
+            jobs = [job for job in jobs if job.job_type.value not in {"photo_batch", "video"}]
         pending = [j.to_dict() for j in jobs if j.status == JobStatus.queued]
         running = [j.to_dict() for j in jobs if j.status == JobStatus.running]
         return _json_response(self, {

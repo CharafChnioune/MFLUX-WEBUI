@@ -1,128 +1,109 @@
-# MLX Video integration audit
+# MLX Video integration
 
-This document records the verified boundary between **MLX Media** and the public
-[`Blaizzy/mlx-video`](https://github.com/Blaizzy/mlx-video) project. It is an
-implementation plan, not a claim that video generation is available in this repository.
+MLX Media exposes one deliberately narrow, locally verified video path through the
+public [`Blaizzy/mlx-video`](https://github.com/Blaizzy/mlx-video) project. The video
+runtime is isolated from MFLUX so its MLX and Transformers versions cannot silently
+break the established photo and SeedVR2 workflows.
 
-## Current product status
+## Supported mode
 
-- The React interface includes a video workflow preview and a typed capability contract.
-- The submit button is intentionally disabled.
-- No video model is installed or downloaded by the frontend.
-- No `mlx-video` dependency has been added to the photo environment.
-- Existing photo and SeedVR2 jobs remain the proven runtime path.
+| Setting | Verified value |
+| --- | --- |
+| Capability | `wan-2.1-t2v-1.3b` |
+| Operation | Text to video |
+| Engine | `mlx-video` commit `87db56a51758fefb748a359b90a5283bb8ba4837` |
+| Model | `Wan-AI/Wan2.1-T2V-1.3B` revision `37ec512624d61f7aa208f7ea8140a131f93afc9a` |
+| Tokenizer | `google/umt5-xxl` revision `66cb9e7e85526fe440a945569e42c72fb6cbc0ad` |
+| Output | MP4, 832 x 480, 16 fps |
+| Frames | `4n + 1`, from 5 through 81 |
+| Sampler | UniPC, 1 through 50 steps, 10-step default |
+| License | MIT engine code; Apache-2.0 model weights |
 
-The upstream source was reviewed at commit
-`87db56a51758fefb748a359b90a5283bb8ba4837` (2026-05-13). Before any runner is
-enabled, that revision must be pinned explicitly and re-audited or replaced by another
-reviewed revision.
+Image-to-video, audio-to-video, LTX, Wan 2.2, LoRA and arbitrary output sizes are not
+advertised. Their presence in upstream source is not evidence that this product has
+tested them.
 
-## Verified upstream boundary
+## Local verification
 
-The upstream package is early-stage (`0.0.1`), MIT-licensed code with no tagged GitHub
-release at the time of review. It exposes command-line entry points and synchronous
-Python generation functions. It does **not** provide a web server, a job queue, a
-stable progress callback, or a safe cancellation protocol.
+The pinned five-frame, ten-step smoke profile completed on a 128 GB Apple-silicon Mac
+in about 37 seconds and produced a coherent, readable 832 x 480 MP4. This is a
+qualification of that machine and exact profile, not a performance promise for other
+Macs. The setup preflight conservatively requires at least 64 GB of unified memory and
+40 GiB free disk until more machines have been measured.
 
-| Family | Verified upstream operations | Important constraints | Weight license |
-| --- | --- | --- | --- |
-| LTX-2 / 2.3 | Text-to-video, image-to-video, first/end-frame conditioning, audio-to-video, optional generated audio, LoRA, two-stage upscaling | Frame count is `1 + 8k`; dimensions are pipeline-dependent multiples of 32 or 64 | LTX-2 Community License; review required before model download or use |
-| Wan 2.1 | Text-to-video and checkpoint-dependent image-to-video | Converted local model directory; frame count is `4n + 1` | Official weights use Apache-2.0 |
-| Wan 2.2 | Text-to-video and image-to-video; single/dual model paths, LoRA, Euler/DPM++/UniPC schedulers | Converted local model directory; frame count is `4n + 1` | Official weights use Apache-2.0 |
+The upstream Wan encoder emitted eight frames for a five-frame request. MLX Media
+therefore validates the raw video, trims only the excess temporal tail, and validates
+the final MP4 again for exact dimensions, frame count, frame rate and readable image
+content before publishing it. A subprocess exit code alone is never accepted as proof
+of a usable video.
 
-Open upstream reports currently include LTX-2.3 image/audio regressions and Wan 2.2
-quantized output artifacts. See the live [issue tracker](https://github.com/Blaizzy/mlx-video/issues)
-and [pull requests](https://github.com/Blaizzy/mlx-video/pulls). A model family is not
-“ready” merely because its class exists upstream.
-
-## Dependency and runtime isolation
-
-MLX Media's photo runtime pins MFLUX, MLX, `mlx-vlm`, `mlx-lm`, Transformers and
-OpenCV versions. `mlx-video` carries its own overlapping dependency graph. Installing
-it into the same environment risks silently breaking photo generation and restoration.
-
-The safe architecture is:
+## Runtime boundary
 
 ```mermaid
 flowchart LR
-  UI["MLX Media UI"] --> API["Local API and media queue"]
-  API --> Photo["Pinned photo environment"]
-  API --> Video["Pinned video subprocess environment"]
+  UI["MLX Media UI"] --> API["Local API and serialized media queue"]
+  API --> Photo["MFLUX photo environment"]
+  API --> Video["Pinned mlx-video subprocess"]
   Photo --> Artifacts["Local artifact store"]
   Video --> Artifacts
 ```
 
-Requirements:
+- Video dependencies live in a separate frozen virtual environment.
+- Official source snapshots use the shared Hugging Face cache; converted weights live
+  under that cache's MLX Media runtime area, never in Pinokio's models directory.
+- Generation uses local model/tokenizer paths, an allowlisted process environment and
+  Hugging Face/Transformers offline mode after provisioning. This prevents cache
+  downloads and credential inheritance; it is not an operating-system network sandbox.
+- Photo and video jobs use the same serialized media queue so large models do not
+  compete for unified memory.
+- Running cancellation terminates the isolated generator process group. Stage-boundary
+  and final-publication checks remove partial or just-published artifacts if cancellation
+  races with MP4 validation.
+- Completed artifacts are served by local, validated API paths rather than filesystem
+  paths or base64 JSON.
 
-1. Pin the video engine to an audited source revision. Do not install an unrelated
-   package from an unqualified `pip install mlx-video` command.
-2. Run video in a separate virtual environment and subprocess.
-3. Serialize photo and video work through the existing media queue so two large models
-   never fight over unified memory.
-4. Return artifact metadata and a local artifact URL; do not move video through JSON as
-   base64.
-5. Make model license acknowledgement explicit. Do not auto-accept gated terms.
+The Wan path currently upcasts its large text encoder during execution. Quantizing the
+smaller diffusion transformer does not remove that memory pressure. Do not describe
+this first integration as suitable for 16 GB or 24 GB Macs.
 
-## Proposed versioned API contract
-
-The UI consumes a server-owned capability registry instead of hard-coding a universal
-form. Every capability reports availability and a reason, pinned engine revision and
-test state, isolation and cancellation modes, model cache/configuration state,
-operation flags, parameter ranges, output/audio features, and license information.
+## Local API
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/video/capabilities` | Versioned model and operation registry |
-| `GET` | `/api/v1/video/status` | Isolated runner, dependency and active-media-job state |
-| `POST` | `/api/v1/generate` | Existing queue submission with `type: "video"`, `operation`, and `capability_id` |
-| `GET` | `/api/v1/jobs/{id}` | Existing job status endpoint |
-| `GET` | `/api/v1/jobs/{id}/stream` | Existing SSE channel; events must reflect actual runner state |
-| `DELETE` | `/api/v1/jobs/{id}` | Queued cancellation only until cooperative runner cancellation is proven |
+| `GET` | `/api/v1/video/capabilities` | Exact server-owned capability and limits |
+| `GET` | `/api/v1/video/status` | Pinned runtime, model, smoke-test and media-queue state |
+| `POST` | `/api/v1/generate` | Submit the supported video request with `type: "video"` |
+| `GET` | `/api/v1/jobs/{id}` | Read queue, progress and result state |
+| `GET` | `/api/v1/jobs/{id}/stream` | Receive actual stage and denoising progress |
+| `DELETE` | `/api/v1/jobs/{id}` | Cancel queued work or terminate a running video process |
+| `GET` | `/api/v1/video/artifacts/{id}/{file}` | Read a validated local MP4 or provenance file |
 
-The corresponding frontend-only TypeScript contract lives in
-`frontend/src/videoApi.ts`. These endpoints are **proposed**; the current backend does
-not advertise or accept video jobs.
+All video routes are loopback-only. Request validation rejects unknown capabilities,
+operations, parameters and filesystem paths. The server constructs the executable,
+model and output paths from its own pinned runtime configuration.
 
-## Staged delivery plan
+## Provisioning
 
-### Stage 0 — discovery and status
+The source repository includes `scripts/setup_mlx_video_runner.py`. Its `plan` action
+performs architecture, memory and disk checks without downloading a model. Its
+`provision` action clones the audited engine revision, reproduces its frozen dependency
+lock, downloads the exact model and tokenizer revisions into the shared cache,
+converts the model to the isolated MLX runtime, and writes a hash manifest for every
+converted artifact. Runtime readiness also requires a clean pinned engine checkout,
+the exact tokenizer snapshot, unchanged model file state and a matching smoke artifact.
 
-- Serve the versioned capability registry and runner status.
-- Keep every capability unavailable with a precise reason until locally verified.
-- Add dependency, architecture and Apple-silicon preflight checks.
+Provisioning is intentionally separate from the React interface. A setup failure must
+leave video unavailable without changing the photo environment.
 
-### Stage 1 — queue contract
+## Known limits
 
-- Add a fake runner that exercises submission, serialized queueing, artifacts and SSE.
-- Permit cancellation only while queued.
-- Prove that photo jobs remain unchanged and retain priority.
+- Upstream is early-stage and has no tagged release at the pinned revision.
+- Transformers reports an upstream tokenizer-regex compatibility warning. The verified
+  smoke works, but prompt-quality comparisons should accompany a future engine update.
+- Cancellation is process-level, not an upstream cooperative callback.
+- Time Lens has no implemented research, retrieval or historical-grounding backend.
+  Its interface must remain unavailable rather than simulate results.
 
-### Stage 2 — one proven path
-
-- Pin one engine revision and one exact model checkpoint.
-- Begin with one conservative text-to-video operation.
-- Add golden-input smoke tests for dimensions, frame count, container validity and
-  deterministic metadata.
-- Enable the UI action only for the passing capability.
-
-### Stage 3 — model expansion
-
-- Add image/audio conditioning one family at a time.
-- Add checkpoint-aware defaults rather than generic controls.
-- Validate quality, memory use, model download state, and weight license for each path.
-
-### Stage 4 — honest progress and cancellation
-
-- Expose subprocess stages only when they correspond to observable work.
-- Add cooperative running cancellation only after the subprocess actually stops and
-  partial artifacts are cleaned safely.
-- Defer advanced downloads, codecs, generated audio and LoRA controls until covered by
-  isolated tests.
-
-## Release gate
-
-A capability may be labelled **Ready** only when its exact engine revision and model
-checkpoint are pinned, the model is configured and cached, a local Apple-silicon smoke
-test produces a valid artifact, the relevant license has been acknowledged, and photo
-regression tests still pass. Until then the product must say **Preview**, **Setup
-required**, or **Unavailable** with the reason.
+Any additional model or operation needs its own pinned license review, Apple-silicon
+memory measurement, real generation test, artifact validation and photo-regression
+run before it can enter the capability registry.

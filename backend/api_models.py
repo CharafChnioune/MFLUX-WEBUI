@@ -25,6 +25,7 @@ class JobType(str, Enum):
     controlnet = "controlnet"
     upscale = "upscale"
     photo_batch = "photo_batch"
+    video = "video"
 
 
 @dataclass

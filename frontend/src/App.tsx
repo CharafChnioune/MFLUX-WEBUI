@@ -9,7 +9,9 @@ import {
   CloudOff,
   Command,
   Cpu,
+  Download,
   Eye,
+  ExternalLink,
   Film,
   FolderOpen,
   GalleryVerticalEnd,
@@ -17,16 +19,15 @@ import {
   HardDrive,
   History,
   Image as ImageIcon,
-  ImagePlus,
   Info,
   Layers3,
   Library,
+  LoaderCircle,
   LockKeyhole,
   MapPin,
   Menu,
   MoreHorizontal,
   MonitorPlay,
-  Music2,
   Play,
   Plus,
   RefreshCw,
@@ -35,6 +36,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Square,
   Tag,
   TriangleAlert,
   Upload,
@@ -46,17 +48,26 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import {
-  VIDEO_CAPABILITIES,
+  cancelVideoJob,
+  fetchVideoCapabilities,
+  fetchVideoJob,
+  fetchVideoStatus,
   isFrameCountValid,
-  tasksForModel,
-  type VideoModelFamilyId,
-  type VideoTask,
+  isVideoJobTerminal,
+  localArtifactUrl,
+  submitVideoJob,
+  type VideoCapabilityRegistry,
+  type VideoGenerationRequest,
+  type VideoJobResponse,
+  type VideoRuntimeStatus,
+  type VideoWorkspaceState,
 } from "./videoApi";
 
 type PageId =
@@ -80,9 +91,9 @@ type NavItem = {
 const navigation: NavItem[] = [
   { id: "home", label: "Home", description: "Your local media launchpad", icon: Aperture },
   { id: "create", label: "Images", description: "Generate and edit stills", icon: Sparkles },
-  { id: "video", label: "Video", description: "Design motion workflows", icon: Film },
+  { id: "video", label: "Video", description: "Generate local motion", icon: Film },
   { id: "restore", label: "Restore", description: "Faithful photo enhancement", icon: WandSparkles },
-  { id: "time-lens", label: "Time Lens", description: "Bring memories forward", icon: History },
+  { id: "time-lens", label: "Time Lens", description: "Concept preview · unavailable", icon: History },
   { id: "library", label: "Library", description: "Projects and outputs", icon: Library },
   { id: "models", label: "Models", description: "Your local model catalog", icon: Layers3 },
   { id: "activity", label: "Activity", description: "Queue and history", icon: Activity },
@@ -106,15 +117,15 @@ const quickActions = [
   },
   {
     id: "video" as PageId,
-    title: "Design a video",
-    copy: "Shape a local text, image or audio-to-video job with verified model constraints.",
+    title: "Generate a video",
+    copy: "Turn a motion brief into a local MP4 with server-validated settings.",
     icon: Film,
     tone: "blue",
   },
   {
     id: "time-lens" as PageId,
-    title: "Open Time Lens",
-    copy: "Recover old photographs with a gentle, story-first workflow.",
+    title: "Preview Time Lens",
+    copy: "Explore the future guided-restoration concept. Processing is not connected yet.",
     icon: History,
     tone: "magenta",
   },
@@ -175,38 +186,11 @@ const modelCards = [
     tone: "green",
     kind: "Photo",
   },
-  {
-    name: "LTX-2 / 2.3",
-    role: "Joint audio & video",
-    copy: "Text, image and audio-conditioned generation with distilled and dev pipelines.",
-    tags: ["T2V", "I2V", "A2V", "19B"],
-    status: "Contract preview",
-    tone: "cyan",
-    kind: "Video",
-  },
-  {
-    name: "Wan 2.1",
-    role: "Converted local video",
-    copy: "Single-model text-to-video and model-dependent image-to-video on Apple silicon.",
-    tags: ["T2V", "I2V", "1.3B / 14B"],
-    status: "Setup required",
-    tone: "blue",
-    kind: "Video",
-  },
-  {
-    name: "Wan 2.2",
-    role: "Single & dual-model video",
-    copy: "Text and image workflows with local converted weights, scheduler and LoRA controls.",
-    tags: ["T2V", "I2V", "5B / 14B"],
-    status: "Setup required",
-    tone: "violet",
-    kind: "Video",
-  },
 ];
 
 const libraryItems = [
   { title: "Golden-hour walk", meta: "18 photographs", tag: "Travel", art: "sunset" },
-  { title: "Family archive", meta: "42 restored", tag: "Time Lens", art: "archive" },
+  { title: "Family archive", meta: "42 restored", tag: "Archive", art: "archive" },
   { title: "Coastal light", meta: "12 variations", tag: "Create", art: "coast" },
   { title: "Overnight journey", meta: "7 photographs", tag: "Travel", art: "night" },
   { title: "Poster studies", meta: "24 outputs", tag: "Typography", art: "poster" },
@@ -225,10 +209,12 @@ function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -237,6 +223,7 @@ function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
     >
       <span />
@@ -325,12 +312,14 @@ function ComparisonStage({
   onChange,
   variant = "sunset",
   compact = false,
+  disabled = false,
 }: {
   src: string | null;
   value: number;
   onChange: (value: number) => void;
   variant?: string;
   compact?: boolean;
+  disabled?: boolean;
 }) {
   const clipStyle = { "--compare": `${value}%` } as CSSProperties;
 
@@ -357,6 +346,7 @@ function ComparisonStage({
           max="100"
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
+          disabled={disabled}
         />
       </label>
     </div>
@@ -392,7 +382,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
           <div className="hero-orbit hero-orbit--two" />
           <div className="floating-output floating-output--back"><MockPhoto variant="coast" /></div>
           <div className="floating-output floating-output--front"><MockPhoto variant="sunset" /></div>
-          <div className="hero-status"><ShieldCheck size={15} /> Local only · Ready</div>
+          <div className="hero-status"><ShieldCheck size={15} /> Local only · Capability aware</div>
         </div>
       </section>
 
@@ -445,13 +435,13 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
         <div className="panel system-card">
           <div className="system-card-head">
             <span className="system-icon"><Zap size={19} /></span>
-            <div><span className="eyebrow">Apple silicon</span><h3>Studio ready</h3></div>
-            <span className="status-dot" aria-label="System is ready" />
+            <div><span className="eyebrow">Apple silicon</span><h3>Private workspace</h3></div>
+            <span className="status-dot" aria-label="Local workspace" />
           </div>
           <div className="system-meter"><span style={{ width: "32%" }} /></div>
           <div className="system-stats">
             <span><small>Memory profile</small><strong>Balanced</strong></span>
-            <span><small>Queue</small><strong>Clear</strong></span>
+            <span><small>Queue</small><strong>Server managed</strong></span>
           </div>
           <p><CloudOff size={14} /> Your media stays on this Mac by default.</p>
         </div>
@@ -521,148 +511,412 @@ function CreatePage({ notify }: { notify: (message: string) => void }) {
   );
 }
 
-const videoTaskLabels: Record<VideoTask, string> = {
-  "text-to-video": "Text to video",
-  "image-to-video": "Image to video",
-  "audio-to-video": "Audio to video",
-};
+function useVideoWorkspace(): VideoWorkspaceState {
+  const [registry, setRegistry] = useState<VideoCapabilityRegistry | null>(null);
+  const [runtime, setRuntime] = useState<VideoRuntimeStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-const videoTaskIcons: Record<VideoTask, LucideIcon> = {
-  "text-to-video": Film,
-  "image-to-video": ImagePlus,
-  "audio-to-video": Music2,
-};
-
-function VideoPage({ notify }: { notify: (message: string) => void }) {
-  const [model, setModel] = useState<VideoModelFamilyId>("ltx-2");
-  const [task, setTask] = useState<VideoTask>("text-to-video");
-  const [prompt, setPrompt] = useState("A slow camera move through soft window light, natural motion, cinematic framing");
-  const [frames, setFrames] = useState(33);
-  const [sourceName, setSourceName] = useState("");
-  const capability = VIDEO_CAPABILITIES.find((item) => item.id === model) ?? VIDEO_CAPABILITIES[0];
-  const availableTasks = tasksForModel(model);
-  const frameValid = isFrameCountValid(model, frames);
-  const fps = 24;
-  const duration = (frames / fps).toFixed(1);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [nextRegistry, nextRuntime] = await Promise.all([
+        fetchVideoCapabilities(),
+        fetchVideoStatus(),
+      ]);
+      setRegistry(nextRegistry);
+      setRuntime(nextRuntime);
+      setError("");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "The local video service is unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!availableTasks.includes(task)) setTask("text-to-video");
-    setSourceName("");
-  }, [availableTasks, model, task]);
+    void refresh();
+    const timer = window.setInterval(() => {
+      void fetchVideoStatus()
+        .then((nextRuntime) => {
+          setRuntime(nextRuntime);
+          setError("");
+        })
+        .catch((nextError) => {
+          setError(nextError instanceof Error ? nextError.message : "The local video service is unavailable.");
+        });
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
 
-  const onConditioningFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setSourceName(file.name);
-    notify(`${file.name} added to the local workflow draft.`);
+  return { registry, runtime, loading, error, refresh };
+}
+
+function humanizeVideoStage(value: string): string {
+  if (!value) return "Waiting for the local runner";
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function videoRuntimeLabel(video: VideoWorkspaceState): string {
+  if (video.loading && !video.runtime) return "Checking";
+  if (video.error && !video.runtime) return "Unavailable";
+  if (video.runtime?.state === "ready") return "Ready";
+  if (video.runtime?.state === "busy") return "Busy";
+  return "Setup required";
+}
+
+function VideoPage({ video, notify }: { video: VideoWorkspaceState; notify: (message: string) => void }) {
+  const capabilities = video.registry?.capabilities ?? [];
+  const [capabilityId, setCapabilityId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [frames, setFrames] = useState(5);
+  const [steps, setSteps] = useState(10);
+  const [tiling, setTiling] = useState("auto");
+  const [seed, setSeed] = useState("");
+  const [jobId, setJobId] = useState("");
+  const [job, setJob] = useState<VideoJobResponse | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [jobError, setJobError] = useState("");
+  const capability = capabilities.find((item) => item.id === capabilityId) ?? null;
+
+  useEffect(() => {
+    if (!capabilities.length) {
+      setCapabilityId("");
+      return;
+    }
+    if (capabilities.some((item) => item.id === capabilityId)) return;
+    const preferred = capabilities.find((item) => item.id === video.registry?.default_capability_id) ?? capabilities[0];
+    setCapabilityId(preferred.id);
+  }, [capabilities, capabilityId, video.registry?.default_capability_id]);
+
+  useEffect(() => {
+    if (!capability) return;
+    setFrames(capability.parameters.num_frames.minimum);
+    setSteps(capability.parameters.steps.default);
+    setTiling(capability.parameters.tiling.default);
+    setSeed("");
+  }, [capability?.id]);
+
+  useEffect(() => {
+    if (!jobId || (job && isVideoJobTerminal(job.status))) return undefined;
+    let disposed = false;
+
+    const update = async () => {
+      try {
+        const next = await fetchVideoJob(jobId);
+        if (disposed) return;
+        setJob(next);
+        setJobError(next.error?.message ?? "");
+        if (isVideoJobTerminal(next.status)) void video.refresh();
+      } catch (nextError) {
+        if (!disposed) setJobError(nextError instanceof Error ? nextError.message : "The video job could not be read.");
+      }
+    };
+
+    void update();
+    const timer = window.setInterval(() => void update(), 1200);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.status, jobId, video.refresh]);
+
+  const frameValid = capability ? isFrameCountValid(capability, frames) : false;
+  const promptValid = capability
+    ? prompt.trim().length >= capability.parameters.prompt.min_length
+      && prompt.trim().length <= capability.parameters.prompt.max_length
+    : false;
+  const seedNumber = seed === "" ? undefined : Number(seed);
+  const seedValid = capability
+    ? seedNumber === undefined
+      || (Number.isInteger(seedNumber)
+        && seedNumber >= capability.parameters.seed.minimum
+        && seedNumber <= capability.parameters.seed.maximum)
+    : false;
+  const stepsValid = capability
+    ? Number.isInteger(steps)
+      && steps >= capability.parameters.steps.minimum
+      && steps <= capability.parameters.steps.maximum
+    : false;
+  const tilingValid = capability?.parameters.tiling.allowed.includes(tiling) ?? false;
+  const jobActive = Boolean(jobId && (!job || !isVideoJobTerminal(job.status)));
+  const runtimeReady = video.runtime?.ready === true && video.runtime.state === "ready";
+  const capabilityReady = capability?.availability === "ready";
+  const operation = capability?.operations.includes("text-to-video") ? "text-to-video" : "";
+  const canSubmit = Boolean(
+    capability
+    && operation
+    && runtimeReady
+    && capabilityReady
+    && frameValid
+    && promptValid
+    && seedValid
+    && stepsValid
+    && tilingValid
+    && !submitting
+    && !jobActive,
+  );
+  const progress = Math.max(0, Math.min(100, job?.progress.percent ?? 0));
+  const artifactUrls = job?.result?.artifact_urls;
+  const videoUrl = localArtifactUrl(artifactUrls?.video);
+  const duration = capability ? (frames / capability.parameters.fps.fixed).toFixed(2) : "—";
+  const runtimeLabel = videoRuntimeLabel(video);
+
+  const submit = async () => {
+    if (!capability || !canSubmit) return;
+    const request: VideoGenerationRequest = {
+      schema_version: 1,
+      type: "video",
+      operation,
+      capability_id: capability.id,
+      prompt: prompt.trim(),
+      output: {
+        width: capability.parameters.width.fixed,
+        height: capability.parameters.height.fixed,
+        num_frames: frames,
+        fps: capability.parameters.fps.fixed,
+        container: capability.output.container,
+      },
+      sampling: {
+        steps,
+        tiling,
+        ...(seedNumber === undefined ? {} : { seed: seedNumber }),
+      },
+    };
+
+    setSubmitting(true);
+    setJob(null);
+    setJobId("");
+    setJobError("");
+    try {
+      const submitted = await submitVideoJob(request);
+      setJobId(submitted.job_id);
+      notify("Video added to the local media queue.");
+      void video.refresh();
+    } catch (nextError) {
+      setJobError(nextError instanceof Error ? nextError.message : "The video job could not be submitted.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!jobId || !jobActive) return;
+    setCancelling(true);
+    try {
+      await cancelVideoJob(jobId);
+      setJob((current) => current ? { ...current, status: "cancelled" } : current);
+      notify("Video cancellation requested.");
+      void video.refresh();
+    } catch (nextError) {
+      setJobError(nextError instanceof Error ? nextError.message : "The video job could not be cancelled.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const clearJob = () => {
+    setJobId("");
+    setJob(null);
+    setJobError("");
   };
 
   return (
     <div className="page-stack video-page">
       <SectionHeading
         eyebrow="Video"
-        title="Direct motion without hiding the machinery"
-        copy="Build a validated video job for mlx-video. The runner stays disabled until its isolated environment, model license and exact checkpoint pass local checks."
-        action={<span className="context-pill context-pill--preview"><MonitorPlay size={14} /> Integration preview</span>}
+        title="Turn a motion brief into a local MP4"
+        copy="Every control comes from the connected server capability. Jobs share the same serialized media queue as photo work."
+        action={(
+          <span className={`context-pill video-state-pill video-state-pill--${video.runtime?.state ?? "setup-required"}`}>
+            {video.loading && !video.runtime ? <LoaderCircle className="is-spinning" size={14} /> : <MonitorPlay size={14} />}
+            {runtimeLabel}
+          </span>
+        )}
       />
 
       <div className="video-studio-grid">
-        <section className="panel video-brief-panel" aria-label="Video workflow brief">
-          <div className="video-mode-list" aria-label="Video task">
-            {availableTasks.map((item) => {
-              const Icon = videoTaskIcons[item];
-              return (
-                <button type="button" key={item} className={task === item ? "is-active" : ""} onClick={() => setTask(item)}>
-                  <Icon size={16} /><span>{videoTaskLabels[item]}</span>
-                </button>
-              );
-            })}
+        <section className="panel video-brief-panel" aria-label="Video generation controls">
+          <div className="video-live-header">
+            <div><span className="eyebrow">Server capability</span><h3>{capability?.label ?? "No video capability connected"}</h3></div>
+            <button type="button" className="button button--ghost button--compact" onClick={() => void video.refresh()} disabled={video.loading}>
+              <RefreshCw className={video.loading ? "is-spinning" : ""} size={14} /> Refresh
+            </button>
           </div>
 
-          <label className="field-stack" htmlFor="video-prompt">
-            <span className="field-label">Motion brief</span>
-            <textarea id="video-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={5} />
-          </label>
-
-          <div className="field-stack">
-            <span className="field-label">MLX video family</span>
-            <div className="video-model-picker">
-              {VIDEO_CAPABILITIES.map((item) => (
-                <button type="button" key={item.id} className={model === item.id ? "is-active" : ""} onClick={() => setModel(item.id)}>
-                  <span><strong>{item.label}</strong><small>{item.source_kind === "hugging-face" ? "Repository weights" : "Converted local folder"}</small></span>
-                  {model === item.id && <Check size={15} />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {task !== "text-to-video" && (
-            <label className="video-source-tile" htmlFor="video-conditioning-file">
-              {task === "audio-to-video" ? <Music2 size={19} /> : <ImagePlus size={19} />}
-              <span>
-                <strong>{sourceName || (task === "audio-to-video" ? "Choose source audio" : "Choose a first frame")}</strong>
-                <small>{task === "audio-to-video" ? "Local audio file · LTX only" : "Local image · never uploaded by the shell"}</small>
-              </span>
-              <Upload size={16} />
-              <input
-                id="video-conditioning-file"
-                type="file"
-                accept={task === "audio-to-video" ? "audio/*" : "image/*"}
-                onChange={onConditioningFile}
-              />
+          {capabilities.length > 1 && (
+            <label className="field-stack" htmlFor="video-capability">
+              <span className="field-label">Video capability</span>
+              <select id="video-capability" value={capabilityId} onChange={(event) => setCapabilityId(event.target.value)}>
+                {capabilities.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
             </label>
           )}
 
-          <div className="video-output-grid">
+          <label className="field-stack" htmlFor="video-prompt">
+            <span className="field-label">Motion brief</span>
+            <textarea
+              id="video-prompt"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={6}
+              maxLength={capability?.parameters.prompt.max_length}
+              placeholder="Describe the scene, camera movement, light and motion…"
+              disabled={!capability || jobActive}
+            />
+            <small className="field-help">{prompt.length}{capability ? ` / ${capability.parameters.prompt.max_length}` : ""} characters</small>
+          </label>
+
+          <div className="video-output-grid video-output-grid--live">
             <label className="field-stack">
               <span className="field-label">Frames</span>
-              <input className={frameValid ? "" : "is-invalid"} type="number" min="1" step={model === "ltx-2" ? 8 : 4} value={frames} onChange={(event) => setFrames(Number(event.target.value))} />
-              <small>{capability.frame_rule}</small>
+              <input
+                className={capability && !frameValid ? "is-invalid" : ""}
+                type="number"
+                min={capability?.parameters.num_frames.minimum}
+                max={capability?.parameters.num_frames.maximum}
+                step={4}
+                value={frames}
+                onChange={(event) => setFrames(Number(event.target.value))}
+                disabled={!capability || jobActive}
+              />
+              <small>{capability ? `${capability.parameters.num_frames.minimum}–${capability.parameters.num_frames.maximum} · ${capability.parameters.num_frames.rule}` : "From server"}</small>
             </label>
-            <div className="field-stack"><span className="field-label">Output</span><span className="video-readout">{model === "ltx-2" ? "512 × 512" : "1280 × 704"}<small>{fps} fps · {duration}s draft</small></span></div>
-            <div className="field-stack"><span className="field-label">Pipeline</span><span className="video-readout">{model === "ltx-2" ? "Distilled" : "UniPC"}<small>Conservative default</small></span></div>
+            <label className="field-stack">
+              <span className="field-label">Steps</span>
+              <input
+                type="number"
+                min={capability?.parameters.steps.minimum}
+                max={capability?.parameters.steps.maximum}
+                value={steps}
+                onChange={(event) => setSteps(Number(event.target.value))}
+                disabled={!capability || jobActive}
+              />
+              <small>{capability ? `${capability.parameters.steps.minimum}–${capability.parameters.steps.maximum}` : "From server"}</small>
+            </label>
+            <label className="field-stack">
+              <span className="field-label">Tiling</span>
+              <select value={tiling} onChange={(event) => setTiling(event.target.value)} disabled={!capability || jobActive}>
+                {(capability?.parameters.tiling.allowed ?? []).map((item) => <option key={item} value={item}>{humanizeVideoStage(item)}</option>)}
+              </select>
+              <small>Server-allowed modes</small>
+            </label>
+            <label className="field-stack">
+              <span className="field-label">Seed <small>optional</small></span>
+              <input
+                className={capability && !seedValid ? "is-invalid" : ""}
+                type="number"
+                min={capability?.parameters.seed.minimum}
+                max={capability?.parameters.seed.maximum}
+                value={seed}
+                placeholder="Random"
+                onChange={(event) => setSeed(event.target.value)}
+                disabled={!capability || jobActive}
+              />
+              <small>Blank chooses a secure random seed</small>
+            </label>
           </div>
 
-          {!frameValid && <p className="validation-note"><TriangleAlert size={14} /> Frame count must follow {capability.frame_rule} for this family.</p>}
+          {capability && (
+            <div className="video-spec-strip">
+              <span><small>Output</small><strong>{capability.parameters.width.fixed} × {capability.parameters.height.fixed}</strong></span>
+              <span><small>Frame rate</small><strong>{capability.parameters.fps.fixed} fps</strong></span>
+              <span><small>Duration</small><strong>{duration}s</strong></span>
+              <span><small>Scheduler</small><strong>{capability.parameters.scheduler.fixed}</strong></span>
+              <span><small>Container</small><strong>{capability.output.container.toUpperCase()}</strong></span>
+            </div>
+          )}
 
-          <div className="video-contract-note">
-            <Info size={16} />
-            <span><strong>Draft only</strong><small>This screen creates no process and downloads no model. Submission unlocks only after backend and checkpoint validation.</small></span>
+          {capability && !frameValid && <p className="validation-note"><TriangleAlert size={14} /> Frames must stay within the server range and follow {capability.parameters.num_frames.rule}.</p>}
+          {capability && !seedValid && <p className="validation-note"><TriangleAlert size={14} /> Seed must be a whole number in the server-provided range.</p>}
+          {video.error && <p className="video-inline-error" role="alert"><TriangleAlert size={15} /> {video.error}</p>}
+          {jobError && <p className="video-inline-error" role="alert"><TriangleAlert size={15} /> {jobError}</p>}
+
+          <div className="button-row video-submit-row">
+            <button className="button button--primary button--grow" type="button" disabled={!canSubmit} onClick={() => void submit()}>
+              {submitting ? <LoaderCircle className="is-spinning" size={17} /> : <Film size={17} />}
+              {submitting ? "Submitting…" : runtimeReady ? "Generate video" : runtimeLabel}
+            </button>
+            {jobActive && (
+              <button className="button button--danger" type="button" onClick={() => void cancel()} disabled={cancelling}>
+                {cancelling ? <LoaderCircle className="is-spinning" size={15} /> : <Square size={14} />} Cancel
+              </button>
+            )}
           </div>
-
-          <button className="button button--primary button--wide" type="button" disabled>
-            <Film size={17} /> Video runner not connected
-          </button>
         </section>
 
-        <section className="panel video-preview-panel" aria-label="Video job preview">
-          <div className="canvas-toolbar"><span><span className="status-dot status-dot--preview" /> Storyboard preview</span><span className="preview-badge">No render started</span></div>
-          <div className="video-canvas">
-            <MockPhoto variant="night" />
-            <div className="video-safe-frame" />
-            <span className="video-play"><Play size={22} /></span>
-            <span className="video-timecode">00:00 / 00:{duration.padStart(4, "0")}</span>
-          </div>
-          <div className="video-timeline" aria-hidden="true">
-            {Array.from({ length: 8 }, (_, index) => <span key={index}><MockPhoto variant={index % 3 === 0 ? "night" : "coast"} /></span>)}
+        <section className="panel video-preview-panel video-preview-panel--live" aria-label="Video job and output">
+          <div className="canvas-toolbar">
+            <span><span className={`status-dot status-dot--${job?.status ?? video.runtime?.state ?? "setup-required"}`} /> Local output</span>
+            <span className={`preview-badge preview-badge--${job?.status ?? video.runtime?.state ?? "setup-required"}`}>{job?.status ?? runtimeLabel}</span>
           </div>
 
-          <div className="video-readiness">
-            <div className="video-readiness__head"><div><span className="eyebrow">Readiness</span><h3>Safe integration gate</h3></div><span className="preview-badge preview-badge--warning">Runner offline</span></div>
-            <div className="readiness-list">
-              <span><Check size={14} /><span><strong>Verified capability map</strong><small>{capability.label} · {availableTasks.map((item) => videoTaskLabels[item]).join(" · ")}</small></span></span>
-              <span><Cpu size={14} /><span><strong>Separate Python environment</strong><small>Required to protect the existing photo stack.</small></span></span>
-              <span><TriangleAlert size={14} /><span><strong>Model license review</strong><small>{capability.license}</small></span></span>
+          {videoUrl ? (
+            <div className="video-result">
+              <video controls preload="metadata" src={videoUrl} aria-label="Generated local video" />
+              <div className="video-result-meta">
+                <span><strong>Generation complete</strong><small>{capability?.label ?? job?.result?.capability_id}</small></span>
+                <a className="button button--ghost button--compact" href={videoUrl} download><Download size={14} /> Download MP4</a>
+              </div>
+              <div className="artifact-links" aria-label="Video artifact details">
+                {localArtifactUrl(artifactUrls?.provenance) && <a href={localArtifactUrl(artifactUrls?.provenance)} target="_blank" rel="noreferrer">Provenance <ExternalLink size={12} /></a>}
+                {localArtifactUrl(artifactUrls?.request) && <a href={localArtifactUrl(artifactUrls?.request)} target="_blank" rel="noreferrer">Request <ExternalLink size={12} /></a>}
+              </div>
             </div>
-            <p>{capability.caution}</p>
+          ) : (
+            <div className={`video-job-stage video-job-stage--${job?.status ?? video.runtime?.state ?? "setup-required"}`}>
+              <span className="video-job-stage__icon">
+                {jobActive || video.loading ? <LoaderCircle className="is-spinning" size={28} /> : video.runtime?.state === "ready" ? <Check size={28} /> : video.runtime?.state === "busy" ? <Clock3 size={28} /> : <TriangleAlert size={28} />}
+              </span>
+              <span className="eyebrow">{job ? "Media queue" : "Video runtime"}</span>
+              <h3>{job ? humanizeVideoStage(job.progress.stage || job.status) : runtimeLabel}</h3>
+              <p>{job
+                ? job.status === "queued"
+                  ? "Waiting behind the current media job. Photo and video work stay serialized."
+                  : job.status === "cancelled"
+                    ? "The job was cancelled and partial video output is not exposed."
+                    : job.status === "failed"
+                      ? "The local runner stopped before a verified MP4 was published."
+                      : "The isolated runner is working locally. You can leave this page open to follow progress."
+                : video.runtime?.state === "ready"
+                  ? "The pinned engine, converted model and smoke proof are ready for a real local job."
+                  : video.runtime?.state === "busy"
+                    ? `A ${video.runtime.active_media_job?.type === "photo_batch" ? "photo restoration" : "video"} job is using the media queue.`
+                    : capability?.availability_reason ?? "Connect the local backend to read video capabilities."}</p>
+
+              {job && (
+                <div className="video-progress" aria-label={`${Math.round(progress)} percent complete`}>
+                  <div><span style={{ width: `${progress}%` }} /></div>
+                  <span><strong>{Math.round(progress)}%</strong><small>{job.progress.total_steps ? `Step ${job.progress.current_step ?? 0} of ${job.progress.total_steps}` : humanizeVideoStage(job.progress.stage)}</small></span>
+                </div>
+              )}
+
+              {job && isVideoJobTerminal(job.status) && (
+                <button type="button" className="button button--ghost" onClick={clearJob}>Start a new video</button>
+              )}
+            </div>
+          )}
+
+          <div className="video-readiness">
+            <div className="video-readiness__head"><div><span className="eyebrow">Live checks</span><h3>Server-reported readiness</h3></div><span className={`preview-badge preview-badge--${video.runtime?.state ?? "setup-required"}`}>{runtimeLabel}</span></div>
+            <div className="readiness-list">
+              <span>{video.runtime?.engine.tested ? <Check size={14} /> : <TriangleAlert size={14} />}<span><strong>Isolated engine</strong><small>{video.runtime ? `${video.runtime.engine.name} · ${video.runtime.engine.tested ? "smoke tested" : "setup incomplete"}` : "Waiting for server status"}</small></span></span>
+              <span>{video.runtime?.model.smoke_tested ? <Check size={14} /> : <Cpu size={14} />}<span><strong>Converted model</strong><small>{video.runtime ? `${video.runtime.model.source} · ${video.runtime.model.cached ? "cached" : "not cached"}` : "Waiting for server status"}</small></span></span>
+              <span><ShieldCheck size={14} /><span><strong>License & isolation</strong><small>{capability ? `${capability.model.license} · ${capability.isolation}` : "Read from capability registry"}</small></span></span>
+            </div>
+            {video.runtime?.reasons?.length ? <ul className="video-reason-list">{video.runtime.reasons.map((reason) => <li key={reason.code}>{reason.message}</li>)}</ul> : null}
           </div>
         </section>
       </div>
 
       <section className="panel video-boundary-strip">
         <span className="video-boundary-icon"><ShieldCheck size={18} /></span>
-        <span><strong>Photo jobs keep priority</strong><small>MLX Media will serialize GPU-heavy photo and video work instead of letting two large models fight over unified memory.</small></span>
-        <button type="button" className="button button--ghost" onClick={() => notify("Integration notes are documented in docs/MLX_VIDEO_INTEGRATION.md.")}>Read integration notes</button>
+        <span><strong>One serialized media queue</strong><small>{video.runtime?.active_media_job ? "New video work waits safely while the active media job finishes." : "Photo and video models never compete for unified memory."}</small></span>
+        <button type="button" className="button button--ghost" onClick={() => void video.refresh()} disabled={video.loading}><RefreshCw className={video.loading ? "is-spinning" : ""} size={14} /> Refresh status</button>
       </section>
     </div>
   );
@@ -785,28 +1039,35 @@ function TimeLensPage({ restoreImage }: { restoreImage: string | null }) {
     <div className="page-stack time-lens-page">
       <SectionHeading
         eyebrow="Time Lens"
-        title="Meet the photograph where it began"
-        copy="Restore the image first, then decide how much of its age and atmosphere should remain."
-        action={<span className="context-pill"><Clock3 size={14} /> Faithful by design</span>}
+        title="A careful idea for guided restoration"
+        copy="This workflow is visible for product exploration, but no model-backed Time Lens processing is connected in this release."
+        action={<span className="context-pill context-pill--unavailable"><LockKeyhole size={14} /> Not available</span>}
       />
-      <section className="time-hero panel">
+      <section className="panel feature-unavailable" role="status">
+        <span><Clock3 size={18} /></span>
+        <div>
+          <strong>Design preview only</strong>
+          <p>The controls below are intentionally disabled. No photo is uploaded, transformed or interpreted by Time Lens.</p>
+        </div>
+      </section>
+      <section className="time-hero panel time-lens-disabled" aria-disabled="true">
         <div className="time-visual">
-          <ComparisonStage src={restoreImage} value={compare} onChange={setCompare} variant="archive" compact />
+          <ComparisonStage src={restoreImage} value={compare} onChange={setCompare} variant="archive" compact disabled />
           <div className="time-year"><small>Working era</small><strong>{year}</strong><span>Set manually</span></div>
         </div>
         <div className="time-story">
           <span className="eyebrow">A guided restoration</span>
           <h3>Keep the texture of the moment.</h3>
           <p>Time Lens separates repair from interpretation, so faces, places and the character of the original remain yours.</p>
-          <label className="year-control"><span><strong>Possible era</strong><small>{year < 1980 ? "Film archive" : year < 2000 ? "Late analogue" : "Early digital"}</small></span><input type="range" min="1940" max="2026" value={year} onChange={(event) => setYear(Number(event.target.value))} /></label>
+          <label className="year-control"><span><strong>Possible era</strong><small>{year < 1980 ? "Film archive" : year < 2000 ? "Late analogue" : "Early digital"}</small></span><input type="range" min="1940" max="2026" value={year} onChange={(event) => setYear(Number(event.target.value))} disabled /></label>
           <p className="truth-note"><Info size={14} /> This era is a creative input, not a verified capture date. Confirm it from your own records before saving.</p>
           <div className="time-toggles">
-            <div className="setting-row"><span><strong>Natural colour recovery</strong><small>Balanced skin tones and faded dyes.</small></span><Toggle checked={color} onChange={setColor} label="Natural colour recovery" /></div>
-            <div className="setting-row"><span><strong>Keep original grain</strong><small>Preserves the medium instead of polishing it away.</small></span><Toggle checked={grain} onChange={setGrain} label="Keep original grain" /></div>
+            <div className="setting-row"><span><strong>Natural colour recovery</strong><small>Balanced skin tones and faded dyes.</small></span><Toggle checked={color} onChange={setColor} label="Natural colour recovery" disabled /></div>
+            <div className="setting-row"><span><strong>Keep original grain</strong><small>Preserves the medium instead of polishing it away.</small></span><Toggle checked={grain} onChange={setGrain} label="Keep original grain" disabled /></div>
           </div>
         </div>
       </section>
-      <section className="timeline panel" aria-label="Time Lens workflow">
+      <section className="timeline panel time-lens-disabled" aria-label="Unavailable Time Lens workflow" aria-disabled="true">
         {["Original scan", "Repair", "Tone recovery", "Story export"].map((step, index) => (
           <div className={`timeline-step ${index === 0 ? "is-active" : ""}`} key={step}>
             <span>{index === 0 ? <Check size={14} /> : index + 1}</span>
@@ -847,14 +1108,34 @@ function LibraryPage() {
   );
 }
 
-function ModelsPage() {
+function ModelsPage({ video }: { video: VideoWorkspaceState }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
-  const filteredModels = useMemo(() => modelCards.filter((model) => {
+  const videoCards = useMemo(() => (video.registry?.capabilities ?? []).map((capability) => ({
+    name: capability.label,
+    role: capability.operations.map(humanizeVideoStage).join(" · "),
+    copy: capability.availability_reason,
+    tags: [
+      capability.model.license,
+      `${capability.parameters.width.fixed} × ${capability.parameters.height.fixed}`,
+      `${capability.parameters.fps.fixed} fps`,
+    ],
+    status: capability.availability === "ready" && video.runtime?.ready
+      ? video.runtime.state === "busy" ? "Busy" : "Ready"
+      : "Setup required",
+    tone: "blue",
+    kind: "Video",
+  })), [video.registry?.capabilities, video.runtime]);
+  const catalogCards = useMemo(() => [...modelCards, ...videoCards], [videoCards]);
+  const filteredModels = useMemo(() => catalogCards.filter((model) => {
     const matchesQuery = `${model.name} ${model.role} ${model.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase());
     const matchesFilter = filter === "All" || model.kind === filter || model.tags.includes(filter);
     return matchesQuery && matchesFilter;
-  }), [filter, query]);
+  }), [catalogCards, filter, query]);
+  const showVideoConnection = videoCards.length === 0
+    && (filter === "All" || filter === "Video")
+    && "video runtime connection".includes(query.trim().toLowerCase());
+  const runtimeLabel = videoRuntimeLabel(video);
 
   return (
     <div className="page-stack">
@@ -862,7 +1143,7 @@ function ModelsPage() {
         eyebrow="Models"
         title="A catalog that explains itself"
         copy="Choose photo and video models by capability, memory, maturity and license—not by cryptic checkpoint names."
-        action={<span className="context-pill"><CloudOff size={14} /> Local catalog preview</span>}
+        action={<span className={`context-pill video-state-pill video-state-pill--${video.runtime?.state ?? "setup-required"}`}><MonitorPlay size={14} /> Video {runtimeLabel.toLowerCase()}</span>}
       />
       <div className="model-toolbar panel">
         <label className="search-field"><Search size={16} /><span className="sr-only">Search models</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models or capabilities" /></label>
@@ -871,6 +1152,15 @@ function ModelsPage() {
         </div>
       </div>
       <div className="model-grid">
+        {showVideoConnection && (
+          <article className="model-card model-card--blue model-card--connection">
+            <div className="model-card-top"><span className="model-glyph"><span /></span><span className="model-status">{runtimeLabel}</span></div>
+            <span className="eyebrow">Video runtime</span>
+            <h3>{video.loading ? "Reading server capabilities" : "No video capability reported"}</h3>
+            <p>{video.error || "The local server has not returned a usable video capability yet. No model is claimed as available."}</p>
+            <button className="model-action" type="button" onClick={() => void video.refresh()}><RefreshCw className={video.loading ? "is-spinning" : ""} size={15} /> Refresh server status</button>
+          </article>
+        )}
         {filteredModels.map((model) => (
           <article className={`model-card model-card--${model.tone}`} key={model.name}>
             <div className="model-card-top"><span className="model-glyph"><span /></span><span className="model-status">{model.status}</span></div>
@@ -878,7 +1168,7 @@ function ModelsPage() {
             <h3>{model.name}</h3>
             <p>{model.copy}</p>
             <div className="model-tags">{model.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-            <button className="model-action" type="button">{model.kind === "Video" ? "Review integration card" : "View capability card"} <ArrowRight size={15} /></button>
+            <button className="model-action" type="button">{model.kind === "Video" ? "Server capability" : "View capability card"} <ArrowRight size={15} /></button>
           </article>
         ))}
       </div>
@@ -886,31 +1176,42 @@ function ModelsPage() {
   );
 }
 
-function ActivityPage() {
-  const jobs = [
-    { title: "Golden-hour walk · restore", meta: "18 photos · SeedVR2 3B", time: "Today, 15:42", status: "Completed" },
-    { title: "Travel concept", meta: "4 variations · Auto", time: "Today, 14:18", status: "Completed" },
-    { title: "Archive scan", meta: "1 photo · Time Lens", time: "Yesterday", status: "Completed" },
-  ];
+function ActivityPage({ video }: { video: VideoWorkspaceState }) {
+  const activeJob = video.runtime?.active_media_job;
+  const runtimeLabel = videoRuntimeLabel(video);
   return (
     <div className="page-stack">
-      <SectionHeading eyebrow="Activity" title="A truthful view of what your Mac is doing" copy="One clear queue for downloads, photo work, future video jobs and exports." />
-      <section className="activity-hero panel"><div className="activity-empty"><span><Check size={21} /></span><div><h3>The queue is clear</h3><p>New work will appear here with real stage-by-stage progress.</p></div></div><div className="activity-metrics"><span><small>Active memory</small><strong>—</strong></span><span><small>Loaded model</small><strong>None</strong></span><span><small>Local status</small><strong>Ready</strong></span></div></section>
-      <section className="panel history-panel">
-        <SectionHeading eyebrow="History preview" title="Recent sessions" action={<button className="text-button" type="button">Clear filters</button>} />
-        <div className="job-list">
-          {jobs.map((job) => <div className="job-row" key={job.title}><span className="job-icon"><Check size={15} /></span><span><strong>{job.title}</strong><small>{job.meta}</small></span><time>{job.time}</time><span className="success-pill">{job.status}</span><button type="button" aria-label={`More options for ${job.title}`}><MoreHorizontal size={17} /></button></div>)}
+      <SectionHeading eyebrow="Activity" title="A truthful view of what your Mac is doing" copy="Photo and video work share one local media queue, while detailed video stages stay visible in the Video workspace." />
+      <section className="activity-hero panel">
+        <div className="activity-empty">
+          <span>{video.runtime?.state === "busy" ? <LoaderCircle className="is-spinning" size={21} /> : video.runtime?.ready ? <Check size={21} /> : <TriangleAlert size={21} />}</span>
+          <div>
+            <h3>{activeJob ? `${activeJob.type === "photo_batch" ? "Photo restoration" : "Video generation"} is active` : video.runtime?.ready ? "The media queue is clear" : runtimeLabel}</h3>
+            <p>{activeJob ? "New work waits safely until the active media job releases unified memory." : video.error || video.runtime?.reasons?.[0]?.message || "New local work will appear here when the server reports it."}</p>
+          </div>
         </div>
+        <div className="activity-metrics"><span><small>Queue</small><strong>{activeJob ? "Occupied" : video.runtime?.ready ? "Clear" : "Unknown"}</strong></span><span><small>Video runtime</small><strong>{runtimeLabel}</strong></span><span><small>Isolation</small><strong>{video.runtime ? humanizeVideoStage(video.runtime.isolation) : "—"}</strong></span></div>
+      </section>
+      <section className="panel history-panel">
+        <SectionHeading eyebrow="History" title="No connected history feed" copy="This screen does not invent completed jobs. Generated video artifacts are available from the active Video workspace." />
       </section>
     </div>
   );
 }
 
-function SettingsPage() {
+function SettingsPage({ video }: { video: VideoWorkspaceState }) {
   const [preserveOriginals, setPreserveOriginals] = useState(true);
   const [localOnly, setLocalOnly] = useState(true);
   const [batteryAware, setBatteryAware] = useState(true);
   const [stepPreviews, setStepPreviews] = useState(false);
+  const runtimeLabel = videoRuntimeLabel(video);
+  const runtimeDetail = video.error
+    || video.runtime?.reasons?.[0]?.message
+    || (video.runtime?.state === "busy"
+      ? "The serialized media queue is currently occupied."
+      : video.runtime?.ready
+        ? "The server reports a tested isolated engine and converted local model."
+        : "The local server has not reported a ready video runtime.");
   return (
     <div className="page-stack settings-page">
       <SectionHeading eyebrow="Settings" title="Make local AI feel predictable" copy="Defaults are conservative, private and reversible." />
@@ -918,7 +1219,15 @@ function SettingsPage() {
         <section className="panel settings-section"><div className="settings-section-head"><span><ShieldCheck size={18} /></span><div><h3>Privacy & originals</h3><p>Control what leaves this Mac and what can be changed.</p></div></div><div className="settings-list"><div className="setting-row"><span><strong>Local-only server</strong><small>Blocks network access unless you explicitly enable sharing.</small></span><Toggle checked={localOnly} onChange={setLocalOnly} label="Local-only server" /></div><div className="setting-row"><span><strong>Never overwrite originals</strong><small>Every edit becomes a new, traceable version.</small></span><Toggle checked={preserveOriginals} onChange={setPreserveOriginals} label="Never overwrite originals" /></div></div></section>
         <section className="panel settings-section"><div className="settings-section-head"><span><Gauge size={18} /></span><div><h3>Apple silicon performance</h3><p>Balance speed, memory and battery use.</p></div></div><div className="settings-list"><div className="setting-row"><span><strong>Battery-aware mode</strong><small>Uses gentler defaults while disconnected from power.</small></span><Toggle checked={batteryAware} onChange={setBatteryAware} label="Battery-aware mode" /></div><div className="setting-row"><span><strong>Step previews</strong><small>Show intermediate images during longer generations.</small></span><Toggle checked={stepPreviews} onChange={setStepPreviews} label="Step previews" /></div></div></section>
         <section className="panel settings-section"><div className="settings-section-head"><span><Sparkles size={18} /></span><div><h3>AI assist connections</h3><p>Provider state is shown separately from creative capabilities.</p></div><span className="preview-badge">Preview</span></div><div className="settings-list"><div className="setting-row"><span><strong>Nativ local server</strong><small>Status and detected-model discovery only; no prompt or vision calls.</small></span><span className="setting-value">Status only</span></div><div className="setting-row"><span><strong>Local prompt refinement</strong><small>Existing Ollama or MLX path; not wired into this React preview.</small></span><span className="setting-value">Not connected</span></div></div></section>
-        <section className="panel settings-section"><div className="settings-section-head"><span><Film size={18} /></span><div><h3>Video runtime</h3><p>Keep experimental video dependencies isolated from proven photo workflows.</p></div><span className="preview-badge preview-badge--warning">Offline</span></div><div className="settings-list"><div className="setting-row"><span><strong>mlx-video environment</strong><small>Separate process and dependency lock required before activation.</small></span><span className="setting-value">Not installed</span></div><div className="setting-row"><span><strong>Media job isolation</strong><small>Photo and video jobs will never compete for unified memory.</small></span><span className="setting-value setting-value--safe">Required</span></div></div></section>
+        <section className="panel settings-section">
+          <div className="settings-section-head"><span><Film size={18} /></span><div><h3>Video runtime</h3><p>{runtimeDetail}</p></div><span className={`preview-badge preview-badge--${video.runtime?.state ?? "setup-required"}`}>{runtimeLabel}</span></div>
+          <div className="settings-list">
+            <div className="setting-row"><span><strong>Isolated engine</strong><small>Status is read from the local runtime, never assumed by the interface.</small></span><span className={`setting-value ${video.runtime?.engine.tested ? "setting-value--safe" : ""}`}>{video.runtime?.engine.tested ? "Smoke tested" : video.runtime?.engine.configured ? "Configured" : "Setup needed"}</span></div>
+            <div className="setting-row"><span><strong>Converted video model</strong><small>Ready requires a cached conversion and a successful server smoke proof.</small></span><span className={`setting-value ${video.runtime?.model.smoke_tested ? "setting-value--safe" : ""}`}>{video.runtime?.model.smoke_tested ? "Ready" : video.runtime?.model.cached ? "Cached · unverified" : "Not ready"}</span></div>
+            <div className="setting-row"><span><strong>Media job isolation</strong><small>Photo and video jobs use the same server-controlled concurrency policy.</small></span><span className="setting-value">{video.runtime ? humanizeVideoStage(video.runtime.concurrency) : "Waiting"}</span></div>
+          </div>
+          <button type="button" className="button button--ghost button--compact settings-refresh" onClick={() => void video.refresh()} disabled={video.loading}><RefreshCw className={video.loading ? "is-spinning" : ""} size={14} /> Refresh runtime</button>
+        </section>
         <section className="panel settings-section settings-section--wide"><div className="settings-section-head"><span><HardDrive size={18} /></span><div><h3>Storage</h3><p>Keep large local models and outputs understandable.</p></div><button className="button button--ghost" type="button">Choose folders</button></div><div className="storage-bar"><span style={{ width: "37%" }} /></div><div className="storage-legend"><span><i className="legend-dot legend-dot--models" />Models · —</span><span><i className="legend-dot legend-dot--outputs" />Outputs · —</span><span>Connect backend for live totals</span></div></section>
       </div>
     </div>
@@ -926,6 +1235,7 @@ function SettingsPage() {
 }
 
 export default function App() {
+  const video = useVideoWorkspace();
   const [activePage, setActivePage] = useState<PageId>("home");
   const [restoreImage, setRestoreImage] = useState<string | null>(null);
   const [restoreName, setRestoreName] = useState("");
@@ -981,13 +1291,13 @@ export default function App() {
     switch (activePage) {
       case "home": return <HomePage onNavigate={navigate} />;
       case "create": return <CreatePage notify={setNotice} />;
-      case "video": return <VideoPage notify={setNotice} />;
+      case "video": return <VideoPage video={video} notify={setNotice} />;
       case "restore": return <RestorePage restoreImage={restoreImage} restoreName={restoreName} onFile={onFile} notify={setNotice} />;
       case "time-lens": return <TimeLensPage restoreImage={restoreImage} />;
       case "library": return <LibraryPage />;
-      case "models": return <ModelsPage />;
-      case "activity": return <ActivityPage />;
-      case "settings": return <SettingsPage />;
+      case "models": return <ModelsPage video={video} />;
+      case "activity": return <ActivityPage video={video} />;
+      case "settings": return <SettingsPage video={video} />;
       default: return null;
     }
   })();
@@ -1040,11 +1350,12 @@ export default function App() {
       <nav className="mobile-nav" aria-label="Mobile studio navigation">
         {navigation.slice(0, 5).map((item) => {
           const Icon = item.icon;
-          return <button type="button" key={item.id} className={activePage === item.id ? "is-active" : ""} aria-current={activePage === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={19} /><span>{item.label}</span></button>;
+          return <button type="button" key={item.id} className={activePage === item.id ? "is-active" : ""} aria-label={item.label} aria-current={activePage === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={19} /><span>{item.label}</span></button>;
         })}
         <button
           type="button"
           className={activePage === "library" || activePage === "settings" || activePage === "models" || activePage === "activity" || moreOpen ? "is-active" : ""}
+          aria-label="More tools"
           aria-expanded={moreOpen}
           aria-controls="studio-quick-menu"
           onClick={() => setMoreOpen((open) => !open)}
