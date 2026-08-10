@@ -12,6 +12,8 @@ Endpoints:
 - DELETE /api/v1/jobs/{id}      (cancel job)
 - GET  /api/v1/health
 - GET  /api/v1/models
+- GET  /api/v1/photo-imports/config
+- POST /api/v1/photo-imports/inventory
 - GET  /api/v1/system
 - GET  /api/v1/queue
 - GET  /api/v1/stats
@@ -28,6 +30,7 @@ import tempfile
 import time
 import os
 import mimetypes
+import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -140,6 +143,48 @@ def _json_response(handler, payload, status=200):
         pass
 
 
+def _photo_import_access_allowed(handler) -> bool:
+    """Keep private photo metadata on loopback and reject non-local web origins."""
+    try:
+        address = str(handler.client_address[0]).split("%", 1)[0]
+        if not ipaddress.ip_address(address).is_loopback:
+            return False
+    except (ValueError, IndexError, TypeError):
+        return False
+
+    host = handler.headers.get("Host")
+    if not host:
+        return False
+    parsed_host = urlparse(f"//{host}")
+    if parsed_host.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+
+    origin = handler.headers.get("Origin")
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.hostname in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }
+
+
+def _photo_json_response(handler, payload, status=200):
+    """JSON response that never grants cross-origin access to non-local sites."""
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        origin = handler.headers.get("Origin")
+        if origin and _photo_import_access_allowed(handler):
+            handler.send_header("Access-Control-Allow-Origin", origin)
+            handler.send_header("Vary", "Origin")
+        handler.end_headers()
+        handler.wfile.write(json.dumps(payload, default=str).encode("utf-8"))
+    except BrokenPipeError:
+        pass
+
+
 def _encode_pil_to_base64(image):
     buff = BytesIO()
     image.save(buff, format="PNG")
@@ -176,6 +221,20 @@ class APIServer(BaseHTTPRequestHandler):
     # ── CORS ────────────────────────────────────────────────────────
 
     def do_OPTIONS(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/v1/photo-imports"):
+            if not _photo_import_access_allowed(self):
+                return _photo_json_response(self, {"error": "Local access only."}, status=403)
+            self.send_response(204)
+            origin = self.headers.get("Origin")
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
+            return
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
@@ -203,6 +262,8 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_health()
         if path == "/api/v1/models":
             return self.handle_v1_models()
+        if path == "/api/v1/photo-imports/config":
+            return self.handle_photo_import_config()
         if path == "/api/v1/system":
             return self.handle_system()
         if path == "/api/v1/providers/nativ":
@@ -262,6 +323,8 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_options_update()
         if path == "/api/v1/generate":
             return self.handle_generate()
+        if path == "/api/v1/photo-imports/inventory":
+            return self.handle_photo_import_inventory()
 
         return _bad_request(self, "Unknown endpoint", status=404)
 
@@ -695,6 +758,36 @@ class APIServer(BaseHTTPRequestHandler):
             "status": "ok",
             "timestamp": time.time(),
         })
+
+    def handle_photo_import_config(self):
+        """GET local photo-import limits and privacy defaults."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.photo_imports import get_photo_import_config
+
+        return _photo_json_response(self, get_photo_import_config())
+
+    def handle_photo_import_inventory(self):
+        """POST a local directory inventory without altering source photos."""
+        if not _photo_import_access_allowed(self):
+            return _photo_json_response(self, {"error": "Local access only."}, status=403)
+
+        from backend.photo_imports import PhotoImportValidationError, inventory_photos
+
+        try:
+            data = self._read_json()
+            if not isinstance(data, dict):
+                raise PhotoImportValidationError("JSON body must be an object.")
+            result = inventory_photos(
+                data.get("directory"),
+                recursive=data.get("recursive", True),
+                gps_mode=data.get("gps_mode", "suggest"),
+                location_overrides=data.get("location_overrides"),
+            )
+        except (PhotoImportValidationError, ValueError) as exc:
+            return _photo_json_response(self, {"error": str(exc)}, status=400)
+        return _photo_json_response(self, result)
 
     def handle_v1_models(self):
         """GET /api/v1/models - models with capabilities."""
