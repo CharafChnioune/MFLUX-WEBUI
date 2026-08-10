@@ -171,11 +171,13 @@ const routes = {
 
 export class VideoApiError extends Error {
   status: number;
+  serverMessage: string;
 
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(status: number, serverMessage = "") {
+    super(`video-api-${status}`);
     this.name = "VideoApiError";
     this.status = status;
+    this.serverMessage = serverMessage;
   }
 }
 
@@ -194,16 +196,16 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json")
     ? await response.json()
-    : { error: `The local server returned ${response.status}.` };
+    : { error: "" };
 
   if (!response.ok) {
     const nestedError = body?.error;
-    const message = typeof nestedError === "string"
+    const serverMessage = typeof nestedError === "string"
       ? nestedError
       : typeof nestedError?.message === "string"
         ? nestedError.message
-        : `The local video service returned ${response.status}.`;
-    throw new VideoApiError(message, response.status);
+        : "";
+    throw new VideoApiError(response.status, serverMessage);
   }
 
   return body as T;

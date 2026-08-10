@@ -122,12 +122,37 @@ npm run dev
 The React app is capability-driven. Restore and the verified video mode use the local
 API; unfinished surfaces such as Time Lens stay visibly unavailable.
 
+The interface ships in English, Dutch, Spanish, German and French. English is the
+default until a person chooses another language in Settings; that choice is stored
+locally in the browser and restored on the next visit.
+
 Production build:
 
 ```bash
 cd frontend
 npm run build
 ```
+
+### Translation workflow
+
+All interface copy lives in `frontend/src/i18n.tsx` as semantic message keys. The
+English dictionary defines the complete key set, and TypeScript requires every other
+dictionary to provide the same keys. UI components call `t("section.message")` instead
+of embedding display copy directly.
+
+To add another language:
+
+1. add its language code and endonym to `languageOptions`;
+2. add a complete dictionary for that code (do not ship machine-translation
+   placeholders);
+3. run `npm run build` in `frontend` to verify key parity and types;
+4. test every route at desktop and mobile widths, including focus labels, dynamic
+   video states and long button text;
+5. change languages in Settings, reload, and confirm the saved choice and document
+   language are both restored.
+
+Keep model names, file formats and server-provided technical identifiers unchanged.
+Translate their surrounding labels and state descriptions instead.
 
 ## Main API surfaces
 

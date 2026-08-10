@@ -2481,6 +2481,63 @@ input[type="range"] {
   border-top: 1px solid var(--border);
 }
 
+.language-section {
+  align-content: start;
+}
+
+.language-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.language-field > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.02em;
+}
+
+.language-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 42px 0 13px;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  appearance: none;
+  background-color: rgba(5, 7, 14, 0.78);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.language-field select:hover {
+  border-color: rgba(99, 230, 255, 0.32);
+  background-color: rgba(10, 13, 24, 0.92);
+}
+
+.language-field select:focus-visible {
+  border-color: rgba(99, 230, 255, 0.7);
+  box-shadow: 0 0 0 4px rgba(99, 230, 255, 0.08);
+}
+
+.language-field small {
+  max-width: 48ch;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
 .storage-legend {
   margin-top: 12px;
   color: var(--text-muted);
@@ -3497,11 +3554,14 @@ input[type="range"] {
 }
 
 .setting-value {
+  max-width: 48%;
   padding: 5px 8px;
   color: #c6d3ed;
   font-size: 8px;
   font-weight: 720;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: right;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.035);
@@ -3830,6 +3890,20 @@ input[type="range"] {
 @media (max-width: 620px) {
   .page-content {
     padding-inline: 14px;
+  }
+
+  .setting-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .setting-row > span:first-child {
+    flex: 1 1 190px;
+    min-width: 0;
+  }
+
+  .setting-value {
+    max-width: min(100%, 220px);
   }
 
   .video-mode-list {
