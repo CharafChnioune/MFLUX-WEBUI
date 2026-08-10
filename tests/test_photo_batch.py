@@ -252,26 +252,38 @@ class PhotoBatchContractTest(unittest.TestCase):
 
         fake_huggingface = types.ModuleType("huggingface_hub")
 
-        def fake_snapshot_download(**kwargs):
-            calls["snapshot"] = kwargs
-            return "/shared/cache/snapshot"
+        with tempfile.TemporaryDirectory() as cache_directory:
+            cache_path = Path(cache_directory)
+            (cache_path / "seedvr2_ema_3b_fp16.safetensors").touch()
+            (cache_path / "ema_vae_fp16.safetensors").touch()
 
-        fake_huggingface.snapshot_download = fake_snapshot_download
-        with (
-            patch(
-                "backend.seedvr2_manager._seedvr2_runtime",
-                return_value=(fake_seedvr2, FakeModelConfig, object()),
-            ),
-            patch.dict(sys.modules, {"huggingface_hub": fake_huggingface}),
-        ):
-            loaded = load_seedvr2_model()
+            def fake_snapshot_download(**kwargs):
+                calls["snapshot"] = kwargs
+                return cache_directory
+
+            fake_huggingface.snapshot_download = fake_snapshot_download
+            with (
+                patch(
+                    "backend.seedvr2_manager._seedvr2_runtime",
+                    return_value=(fake_seedvr2, FakeModelConfig, object()),
+                ),
+                patch.dict(sys.modules, {"huggingface_hub": fake_huggingface}),
+            ):
+                loaded = load_seedvr2_model()
 
         self.assertEqual(loaded, "loaded-model")
         self.assertEqual(
             calls["snapshot"],
-            {"repo_id": "example/seedvr2", "local_files_only": True},
+            {
+                "repo_id": "example/seedvr2",
+                "allow_patterns": [
+                    "seedvr2_ema_3b_fp16.safetensors",
+                    "ema_vae_fp16.safetensors",
+                ],
+                "local_files_only": True,
+            },
         )
-        self.assertEqual(calls["constructor"]["model_path"], "/shared/cache/snapshot")
+        self.assertEqual(calls["constructor"]["model_path"], cache_directory)
 
 
 if __name__ == "__main__":

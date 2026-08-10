@@ -64,13 +64,27 @@ def load_seedvr2_model(model_name: str = "seedvr2-3b"):
     repo_id = getattr(model_config, "model_name", None)
     if not isinstance(repo_id, str) or not repo_id:
         raise RuntimeError("The installed MFLUX release does not expose the SeedVR2 repository.")
+    required_files = [
+        "seedvr2_ema_3b_fp16.safetensors",
+        "ema_vae_fp16.safetensors",
+    ]
     try:
-        model_path = snapshot_download(repo_id=repo_id, local_files_only=True)
+        model_path = snapshot_download(
+            repo_id=repo_id,
+            allow_patterns=required_files,
+            local_files_only=True,
+        )
     except Exception as exc:
         raise RuntimeError(
             "SeedVR2 3B is not complete in the shared Hugging Face cache; "
             "the local-only batch will not download it automatically."
         ) from exc
+
+    if any(not (Path(model_path) / filename).is_file() for filename in required_files):
+        raise RuntimeError(
+            "SeedVR2 3B is not complete in the shared Hugging Face cache; "
+            "the local-only batch will not download it automatically."
+        )
 
     return SeedVR2(model_config=model_config, model_path=model_path)
 
