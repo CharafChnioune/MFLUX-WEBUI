@@ -8,13 +8,16 @@ import {
   Clock3,
   CloudOff,
   Command,
+  Cpu,
   Eye,
+  Film,
   FolderOpen,
   GalleryVerticalEnd,
   Gauge,
   HardDrive,
   History,
   Image as ImageIcon,
+  ImagePlus,
   Info,
   Layers3,
   Library,
@@ -22,6 +25,8 @@ import {
   MapPin,
   Menu,
   MoreHorizontal,
+  MonitorPlay,
+  Music2,
   Play,
   Plus,
   RefreshCw,
@@ -31,6 +36,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Tag,
+  TriangleAlert,
   Upload,
   WandSparkles,
   Zap,
@@ -45,10 +51,18 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  VIDEO_CAPABILITIES,
+  isFrameCountValid,
+  tasksForModel,
+  type VideoModelFamilyId,
+  type VideoTask,
+} from "./videoApi";
 
 type PageId =
   | "home"
   | "create"
+  | "video"
   | "restore"
   | "time-lens"
   | "library"
@@ -64,8 +78,9 @@ type NavItem = {
 };
 
 const navigation: NavItem[] = [
-  { id: "home", label: "Home", description: "Your local launchpad", icon: Aperture },
-  { id: "create", label: "Create", description: "Generate something new", icon: Sparkles },
+  { id: "home", label: "Home", description: "Your local media launchpad", icon: Aperture },
+  { id: "create", label: "Images", description: "Generate and edit stills", icon: Sparkles },
+  { id: "video", label: "Video", description: "Design motion workflows", icon: Film },
   { id: "restore", label: "Restore", description: "Faithful photo enhancement", icon: WandSparkles },
   { id: "time-lens", label: "Time Lens", description: "Bring memories forward", icon: History },
   { id: "library", label: "Library", description: "Projects and outputs", icon: Library },
@@ -90,6 +105,13 @@ const quickActions = [
     tone: "violet",
   },
   {
+    id: "video" as PageId,
+    title: "Design a video",
+    copy: "Shape a local text, image or audio-to-video job with verified model constraints.",
+    icon: Film,
+    tone: "blue",
+  },
+  {
     id: "time-lens" as PageId,
     title: "Open Time Lens",
     copy: "Recover old photographs with a gentle, story-first workflow.",
@@ -106,6 +128,7 @@ const modelCards = [
     tags: ["Restore", "3B", "Promptless"],
     status: "Recommended",
     tone: "cyan",
+    kind: "Photo",
   },
   {
     name: "SeedVR2 7B",
@@ -114,6 +137,7 @@ const modelCards = [
     tags: ["Restore", "7B", "High memory"],
     status: "Available",
     tone: "violet",
+    kind: "Photo",
   },
   {
     name: "FLUX.2 Klein",
@@ -122,6 +146,7 @@ const modelCards = [
     tags: ["Generate", "Edit", "4B / 9B"],
     status: "Catalog",
     tone: "blue",
+    kind: "Photo",
   },
   {
     name: "Krea 2 Turbo",
@@ -130,6 +155,7 @@ const modelCards = [
     tags: ["Generate", "Turbo", "Gated"],
     status: "Catalog",
     tone: "orange",
+    kind: "Photo",
   },
   {
     name: "Ideogram 4",
@@ -138,6 +164,7 @@ const modelCards = [
     tags: ["Text", "Layout", "Structured"],
     status: "Catalog",
     tone: "magenta",
+    kind: "Photo",
   },
   {
     name: "Qwen Image Edit",
@@ -146,6 +173,34 @@ const modelCards = [
     tags: ["Edit", "Multi-image", "20B"],
     status: "Catalog",
     tone: "green",
+    kind: "Photo",
+  },
+  {
+    name: "LTX-2 / 2.3",
+    role: "Joint audio & video",
+    copy: "Text, image and audio-conditioned generation with distilled and dev pipelines.",
+    tags: ["T2V", "I2V", "A2V", "19B"],
+    status: "Contract preview",
+    tone: "cyan",
+    kind: "Video",
+  },
+  {
+    name: "Wan 2.1",
+    role: "Converted local video",
+    copy: "Single-model text-to-video and model-dependent image-to-video on Apple silicon.",
+    tags: ["T2V", "I2V", "1.3B / 14B"],
+    status: "Setup required",
+    tone: "blue",
+    kind: "Video",
+  },
+  {
+    name: "Wan 2.2",
+    role: "Single & dual-model video",
+    copy: "Text and image workflows with local converted weights, scheduler and LoRA controls.",
+    tags: ["T2V", "I2V", "5B / 14B"],
+    status: "Setup required",
+    tone: "violet",
+    kind: "Video",
   },
 ];
 
@@ -161,7 +216,7 @@ const libraryItems = [
 function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
-      <span>M</span>
+      <img src="/assets/mlx-media-emblem.png" alt="" />
     </span>
   );
 }
@@ -313,22 +368,26 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
     <div className="page-stack home-page">
       <section className="hero-panel">
         <div className="hero-copy">
-          <span className="release-pill"><span /> MFLUX · RELAUNCH PREVIEW</span>
-          <h1>MFLUX is back.<br />Your Mac is the studio.</h1>
+          <span className="release-pill"><span /> MLX MEDIA · RELAUNCH PREVIEW</span>
+          <h1>Photo and video.<br />One local studio.</h1>
           <p>
-            Generate, edit and restore images locally with a calmer, faster workspace built
-            around the way creative work actually happens.
+            Create, edit and restore visual media on Apple silicon—with clear model boundaries,
+            private source files and one calm workspace for stills and motion.
           </p>
           <div className="button-row">
             <button className="button button--primary" type="button" onClick={() => onNavigate("restore")}>
               Restore a photo <ArrowRight size={16} />
             </button>
             <button className="button button--ghost" type="button" onClick={() => onNavigate("create")}>
-              Start creating
+              Create an image
+            </button>
+            <button className="button button--ghost" type="button" onClick={() => onNavigate("video")}>
+              Explore video
             </button>
           </div>
         </div>
-        <div className="hero-visual" aria-label="Abstract preview of recent MFLUX work">
+        <div className="hero-visual" aria-label="Abstract preview of recent MLX Media work">
+          <img className="hero-emblem" src="/assets/mlx-media-emblem.png" alt="" />
           <div className="hero-orbit hero-orbit--one" />
           <div className="hero-orbit hero-orbit--two" />
           <div className="floating-output floating-output--back"><MockPhoto variant="coast" /></div>
@@ -341,7 +400,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
         <SectionHeading
           eyebrow="Start here"
           title="What do you want to make?"
-          copy="Choose an intent. MFLUX keeps the model details out of your way until you need them."
+          copy="Choose an intent. MLX Media reveals model constraints only when they matter."
         />
         <div className="quick-grid">
           {quickActions.map((action) => {
@@ -394,7 +453,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
             <span><small>Memory profile</small><strong>Balanced</strong></span>
             <span><small>Queue</small><strong>Clear</strong></span>
           </div>
-          <p><CloudOff size={14} /> Your images stay on this Mac.</p>
+          <p><CloudOff size={14} /> Your media stays on this Mac by default.</p>
         </div>
       </section>
     </div>
@@ -420,7 +479,7 @@ function CreatePage({ notify }: { notify: (message: string) => void }) {
           <div className="prompt-tools">
             <button type="button" className="tool-button"><Plus size={15} /> Reference</button>
             <button type="button" className="tool-button"><Tag size={15} /> Style</button>
-            <button type="button" className="tool-button"><RefreshCw size={15} /> Refine</button>
+            <button type="button" className="tool-button" onClick={() => notify("Local prompt refinement is available in the backend but is not wired to this studio preview yet.")}><RefreshCw size={15} /> Local refine</button>
           </div>
           <div className="field-stack">
             <span className="field-label">Output intent</span>
@@ -458,6 +517,153 @@ function CreatePage({ notify }: { notify: (message: string) => void }) {
           <button type="button" className="text-button expert-link"><Settings size={14} /> Show expert controls</button>
         </aside>
       </div>
+    </div>
+  );
+}
+
+const videoTaskLabels: Record<VideoTask, string> = {
+  "text-to-video": "Text to video",
+  "image-to-video": "Image to video",
+  "audio-to-video": "Audio to video",
+};
+
+const videoTaskIcons: Record<VideoTask, LucideIcon> = {
+  "text-to-video": Film,
+  "image-to-video": ImagePlus,
+  "audio-to-video": Music2,
+};
+
+function VideoPage({ notify }: { notify: (message: string) => void }) {
+  const [model, setModel] = useState<VideoModelFamilyId>("ltx-2");
+  const [task, setTask] = useState<VideoTask>("text-to-video");
+  const [prompt, setPrompt] = useState("A slow camera move through soft window light, natural motion, cinematic framing");
+  const [frames, setFrames] = useState(33);
+  const [sourceName, setSourceName] = useState("");
+  const capability = VIDEO_CAPABILITIES.find((item) => item.id === model) ?? VIDEO_CAPABILITIES[0];
+  const availableTasks = tasksForModel(model);
+  const frameValid = isFrameCountValid(model, frames);
+  const fps = 24;
+  const duration = (frames / fps).toFixed(1);
+
+  useEffect(() => {
+    if (!availableTasks.includes(task)) setTask("text-to-video");
+    setSourceName("");
+  }, [availableTasks, model, task]);
+
+  const onConditioningFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSourceName(file.name);
+    notify(`${file.name} added to the local workflow draft.`);
+  };
+
+  return (
+    <div className="page-stack video-page">
+      <SectionHeading
+        eyebrow="Video"
+        title="Direct motion without hiding the machinery"
+        copy="Build a validated video job for mlx-video. The runner stays disabled until its isolated environment, model license and exact checkpoint pass local checks."
+        action={<span className="context-pill context-pill--preview"><MonitorPlay size={14} /> Integration preview</span>}
+      />
+
+      <div className="video-studio-grid">
+        <section className="panel video-brief-panel" aria-label="Video workflow brief">
+          <div className="video-mode-list" aria-label="Video task">
+            {availableTasks.map((item) => {
+              const Icon = videoTaskIcons[item];
+              return (
+                <button type="button" key={item} className={task === item ? "is-active" : ""} onClick={() => setTask(item)}>
+                  <Icon size={16} /><span>{videoTaskLabels[item]}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="field-stack" htmlFor="video-prompt">
+            <span className="field-label">Motion brief</span>
+            <textarea id="video-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={5} />
+          </label>
+
+          <div className="field-stack">
+            <span className="field-label">MLX video family</span>
+            <div className="video-model-picker">
+              {VIDEO_CAPABILITIES.map((item) => (
+                <button type="button" key={item.id} className={model === item.id ? "is-active" : ""} onClick={() => setModel(item.id)}>
+                  <span><strong>{item.label}</strong><small>{item.source_kind === "hugging-face" ? "Repository weights" : "Converted local folder"}</small></span>
+                  {model === item.id && <Check size={15} />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {task !== "text-to-video" && (
+            <label className="video-source-tile" htmlFor="video-conditioning-file">
+              {task === "audio-to-video" ? <Music2 size={19} /> : <ImagePlus size={19} />}
+              <span>
+                <strong>{sourceName || (task === "audio-to-video" ? "Choose source audio" : "Choose a first frame")}</strong>
+                <small>{task === "audio-to-video" ? "Local audio file · LTX only" : "Local image · never uploaded by the shell"}</small>
+              </span>
+              <Upload size={16} />
+              <input
+                id="video-conditioning-file"
+                type="file"
+                accept={task === "audio-to-video" ? "audio/*" : "image/*"}
+                onChange={onConditioningFile}
+              />
+            </label>
+          )}
+
+          <div className="video-output-grid">
+            <label className="field-stack">
+              <span className="field-label">Frames</span>
+              <input className={frameValid ? "" : "is-invalid"} type="number" min="1" step={model === "ltx-2" ? 8 : 4} value={frames} onChange={(event) => setFrames(Number(event.target.value))} />
+              <small>{capability.frame_rule}</small>
+            </label>
+            <div className="field-stack"><span className="field-label">Output</span><span className="video-readout">{model === "ltx-2" ? "512 × 512" : "1280 × 704"}<small>{fps} fps · {duration}s draft</small></span></div>
+            <div className="field-stack"><span className="field-label">Pipeline</span><span className="video-readout">{model === "ltx-2" ? "Distilled" : "UniPC"}<small>Conservative default</small></span></div>
+          </div>
+
+          {!frameValid && <p className="validation-note"><TriangleAlert size={14} /> Frame count must follow {capability.frame_rule} for this family.</p>}
+
+          <div className="video-contract-note">
+            <Info size={16} />
+            <span><strong>Draft only</strong><small>This screen creates no process and downloads no model. Submission unlocks only after backend and checkpoint validation.</small></span>
+          </div>
+
+          <button className="button button--primary button--wide" type="button" disabled>
+            <Film size={17} /> Video runner not connected
+          </button>
+        </section>
+
+        <section className="panel video-preview-panel" aria-label="Video job preview">
+          <div className="canvas-toolbar"><span><span className="status-dot status-dot--preview" /> Storyboard preview</span><span className="preview-badge">No render started</span></div>
+          <div className="video-canvas">
+            <MockPhoto variant="night" />
+            <div className="video-safe-frame" />
+            <span className="video-play"><Play size={22} /></span>
+            <span className="video-timecode">00:00 / 00:{duration.padStart(4, "0")}</span>
+          </div>
+          <div className="video-timeline" aria-hidden="true">
+            {Array.from({ length: 8 }, (_, index) => <span key={index}><MockPhoto variant={index % 3 === 0 ? "night" : "coast"} /></span>)}
+          </div>
+
+          <div className="video-readiness">
+            <div className="video-readiness__head"><div><span className="eyebrow">Readiness</span><h3>Safe integration gate</h3></div><span className="preview-badge preview-badge--warning">Runner offline</span></div>
+            <div className="readiness-list">
+              <span><Check size={14} /><span><strong>Verified capability map</strong><small>{capability.label} · {availableTasks.map((item) => videoTaskLabels[item]).join(" · ")}</small></span></span>
+              <span><Cpu size={14} /><span><strong>Separate Python environment</strong><small>Required to protect the existing photo stack.</small></span></span>
+              <span><TriangleAlert size={14} /><span><strong>Model license review</strong><small>{capability.license}</small></span></span>
+            </div>
+            <p>{capability.caution}</p>
+          </div>
+        </section>
+      </div>
+
+      <section className="panel video-boundary-strip">
+        <span className="video-boundary-icon"><ShieldCheck size={18} /></span>
+        <span><strong>Photo jobs keep priority</strong><small>MLX Media will serialize GPU-heavy photo and video work instead of letting two large models fight over unified memory.</small></span>
+        <button type="button" className="button button--ghost" onClick={() => notify("Integration notes are documented in docs/MLX_VIDEO_INTEGRATION.md.")}>Read integration notes</button>
+      </section>
     </div>
   );
 }
@@ -643,19 +849,26 @@ function LibraryPage() {
 
 function ModelsPage() {
   const [query, setQuery] = useState("");
-  const filteredModels = useMemo(() => modelCards.filter((model) => `${model.name} ${model.role} ${model.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase())), [query]);
+  const [filter, setFilter] = useState("All");
+  const filteredModels = useMemo(() => modelCards.filter((model) => {
+    const matchesQuery = `${model.name} ${model.role} ${model.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase());
+    const matchesFilter = filter === "All" || model.kind === filter || model.tags.includes(filter);
+    return matchesQuery && matchesFilter;
+  }), [filter, query]);
 
   return (
     <div className="page-stack">
       <SectionHeading
         eyebrow="Models"
         title="A catalog that explains itself"
-        copy="Choose by capability, memory and license—not by cryptic checkpoint names."
+        copy="Choose photo and video models by capability, memory, maturity and license—not by cryptic checkpoint names."
         action={<span className="context-pill"><CloudOff size={14} /> Local catalog preview</span>}
       />
       <div className="model-toolbar panel">
         <label className="search-field"><Search size={16} /><span className="sr-only">Search models</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models or capabilities" /></label>
-        <div className="filter-tabs"><button type="button" className="is-active">All</button><button type="button">Restore</button><button type="button">Create</button><button type="button">Edit</button></div>
+        <div className="filter-tabs" aria-label="Model type">
+          {["All", "Photo", "Video", "Restore", "Edit"].map((item) => <button type="button" key={item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}</button>)}
+        </div>
       </div>
       <div className="model-grid">
         {filteredModels.map((model) => (
@@ -665,7 +878,7 @@ function ModelsPage() {
             <h3>{model.name}</h3>
             <p>{model.copy}</p>
             <div className="model-tags">{model.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-            <button className="model-action" type="button">View capability card <ArrowRight size={15} /></button>
+            <button className="model-action" type="button">{model.kind === "Video" ? "Review integration card" : "View capability card"} <ArrowRight size={15} /></button>
           </article>
         ))}
       </div>
@@ -681,7 +894,7 @@ function ActivityPage() {
   ];
   return (
     <div className="page-stack">
-      <SectionHeading eyebrow="Activity" title="A truthful view of what your Mac is doing" copy="One clear queue for downloads, generation, restoration and exports." />
+      <SectionHeading eyebrow="Activity" title="A truthful view of what your Mac is doing" copy="One clear queue for downloads, photo work, future video jobs and exports." />
       <section className="activity-hero panel"><div className="activity-empty"><span><Check size={21} /></span><div><h3>The queue is clear</h3><p>New work will appear here with real stage-by-stage progress.</p></div></div><div className="activity-metrics"><span><small>Active memory</small><strong>—</strong></span><span><small>Loaded model</small><strong>None</strong></span><span><small>Local status</small><strong>Ready</strong></span></div></section>
       <section className="panel history-panel">
         <SectionHeading eyebrow="History preview" title="Recent sessions" action={<button className="text-button" type="button">Clear filters</button>} />
@@ -704,6 +917,8 @@ function SettingsPage() {
       <div className="settings-grid">
         <section className="panel settings-section"><div className="settings-section-head"><span><ShieldCheck size={18} /></span><div><h3>Privacy & originals</h3><p>Control what leaves this Mac and what can be changed.</p></div></div><div className="settings-list"><div className="setting-row"><span><strong>Local-only server</strong><small>Blocks network access unless you explicitly enable sharing.</small></span><Toggle checked={localOnly} onChange={setLocalOnly} label="Local-only server" /></div><div className="setting-row"><span><strong>Never overwrite originals</strong><small>Every edit becomes a new, traceable version.</small></span><Toggle checked={preserveOriginals} onChange={setPreserveOriginals} label="Never overwrite originals" /></div></div></section>
         <section className="panel settings-section"><div className="settings-section-head"><span><Gauge size={18} /></span><div><h3>Apple silicon performance</h3><p>Balance speed, memory and battery use.</p></div></div><div className="settings-list"><div className="setting-row"><span><strong>Battery-aware mode</strong><small>Uses gentler defaults while disconnected from power.</small></span><Toggle checked={batteryAware} onChange={setBatteryAware} label="Battery-aware mode" /></div><div className="setting-row"><span><strong>Step previews</strong><small>Show intermediate images during longer generations.</small></span><Toggle checked={stepPreviews} onChange={setStepPreviews} label="Step previews" /></div></div></section>
+        <section className="panel settings-section"><div className="settings-section-head"><span><Sparkles size={18} /></span><div><h3>AI assist connections</h3><p>Provider state is shown separately from creative capabilities.</p></div><span className="preview-badge">Preview</span></div><div className="settings-list"><div className="setting-row"><span><strong>Nativ local server</strong><small>Status and detected-model discovery only; no prompt or vision calls.</small></span><span className="setting-value">Status only</span></div><div className="setting-row"><span><strong>Local prompt refinement</strong><small>Existing Ollama or MLX path; not wired into this React preview.</small></span><span className="setting-value">Not connected</span></div></div></section>
+        <section className="panel settings-section"><div className="settings-section-head"><span><Film size={18} /></span><div><h3>Video runtime</h3><p>Keep experimental video dependencies isolated from proven photo workflows.</p></div><span className="preview-badge preview-badge--warning">Offline</span></div><div className="settings-list"><div className="setting-row"><span><strong>mlx-video environment</strong><small>Separate process and dependency lock required before activation.</small></span><span className="setting-value">Not installed</span></div><div className="setting-row"><span><strong>Media job isolation</strong><small>Photo and video jobs will never compete for unified memory.</small></span><span className="setting-value setting-value--safe">Required</span></div></div></section>
         <section className="panel settings-section settings-section--wide"><div className="settings-section-head"><span><HardDrive size={18} /></span><div><h3>Storage</h3><p>Keep large local models and outputs understandable.</p></div><button className="button button--ghost" type="button">Choose folders</button></div><div className="storage-bar"><span style={{ width: "37%" }} /></div><div className="storage-legend"><span><i className="legend-dot legend-dot--models" />Models · —</span><span><i className="legend-dot legend-dot--outputs" />Outputs · —</span><span>Connect backend for live totals</span></div></section>
       </div>
     </div>
@@ -766,6 +981,7 @@ export default function App() {
     switch (activePage) {
       case "home": return <HomePage onNavigate={navigate} />;
       case "create": return <CreatePage notify={setNotice} />;
+      case "video": return <VideoPage notify={setNotice} />;
       case "restore": return <RestorePage restoreImage={restoreImage} restoreName={restoreName} onFile={onFile} notify={setNotice} />;
       case "time-lens": return <TimeLensPage restoreImage={restoreImage} />;
       case "library": return <LibraryPage />;
@@ -780,9 +996,9 @@ export default function App() {
     <div className="app-shell">
       <a className="skip-link" href="#studio-main">Skip to workspace</a>
       <aside className="sidebar">
-        <button type="button" className="brand" onClick={() => navigate("home")} aria-label="MFLUX Studio home">
+        <button type="button" className="brand" onClick={() => navigate("home")} aria-label="MLX Media home">
           <BrandMark />
-          <span><strong>MFLUX</strong><small>STUDIO</small></span>
+          <span><strong>MLX</strong><small>MEDIA</small></span>
         </button>
         <nav className="primary-nav" aria-label="Studio navigation">
           <span className="nav-label">Workspace</span>
@@ -796,12 +1012,12 @@ export default function App() {
             return <button type="button" key={item.id} className={activePage === item.id ? "is-active" : ""} aria-current={activePage === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>;
           })}
         </nav>
-        <div className="sidebar-footer"><span className="mini-status"><i /> Local workspace</span><button type="button" aria-label="Open workspace menu"><MoreHorizontal size={17} /></button></div>
+        <div className="sidebar-footer"><span className="mini-status"><i /> Local media</span><button type="button" aria-label="Open workspace menu"><MoreHorizontal size={17} /></button></div>
       </aside>
 
       <div className="app-main">
         <header className="topbar">
-          <div className="mobile-brand"><BrandMark /><strong>MFLUX</strong></div>
+          <div className="mobile-brand"><BrandMark /><strong>MLX MEDIA</strong></div>
           <div className="page-identity"><span>{activeMeta.label}</span><small>{activeMeta.description}</small></div>
           <div className="topbar-actions">
             <button ref={searchRef} type="button" className="search-button" aria-label="Open command search"><Search size={16} /><span>Search studio</span><kbd><Command size={11} />K</kbd></button>
@@ -828,7 +1044,7 @@ export default function App() {
         })}
         <button
           type="button"
-          className={activePage === "settings" || activePage === "models" || activePage === "activity" || moreOpen ? "is-active" : ""}
+          className={activePage === "library" || activePage === "settings" || activePage === "models" || activePage === "activity" || moreOpen ? "is-active" : ""}
           aria-expanded={moreOpen}
           aria-controls="studio-quick-menu"
           onClick={() => setMoreOpen((open) => !open)}
