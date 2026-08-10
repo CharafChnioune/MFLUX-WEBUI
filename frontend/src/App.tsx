@@ -15,8 +15,11 @@ import {
   HardDrive,
   History,
   Image as ImageIcon,
+  Info,
   Layers3,
   Library,
+  LockKeyhole,
+  MapPin,
   Menu,
   MoreHorizontal,
   Play,
@@ -147,12 +150,12 @@ const modelCards = [
 ];
 
 const libraryItems = [
-  { title: "Córdoba evenings", meta: "18 photographs", tag: "Travel", art: "cordoba" },
+  { title: "Golden-hour walk", meta: "18 photographs", tag: "Travel", art: "sunset" },
   { title: "Family archive", meta: "42 restored", tag: "Time Lens", art: "archive" },
-  { title: "Coastal studies", meta: "12 variations", tag: "Create", art: "coast" },
-  { title: "Night train", meta: "7 photographs", tag: "Travel", art: "night" },
-  { title: "Poster concepts", meta: "24 outputs", tag: "Typography", art: "poster" },
-  { title: "Print selects", meta: "9 print-ready", tag: "Restore", art: "print" },
+  { title: "Coastal light", meta: "12 variations", tag: "Create", art: "coast" },
+  { title: "Overnight journey", meta: "7 photographs", tag: "Travel", art: "night" },
+  { title: "Poster studies", meta: "24 outputs", tag: "Typography", art: "poster" },
+  { title: "Print collection", meta: "9 print-ready", tag: "Restore", art: "print" },
 ];
 
 function BrandMark() {
@@ -237,7 +240,7 @@ function SectionHeading({
   );
 }
 
-function MockPhoto({ variant = "cordoba" }: { variant?: string }) {
+function MockPhoto({ variant = "sunset" }: { variant?: string }) {
   return (
     <div className={`mock-photo mock-photo--${variant}`} aria-hidden="true">
       <span className="mock-sun" />
@@ -265,7 +268,7 @@ function ComparisonStage({
   src,
   value,
   onChange,
-  variant = "cordoba",
+  variant = "sunset",
   compact = false,
 }: {
   src: string | null;
@@ -329,7 +332,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
           <div className="hero-orbit hero-orbit--one" />
           <div className="hero-orbit hero-orbit--two" />
           <div className="floating-output floating-output--back"><MockPhoto variant="coast" /></div>
-          <div className="floating-output floating-output--front"><MockPhoto variant="cordoba" /></div>
+          <div className="floating-output floating-output--front"><MockPhoto variant="sunset" /></div>
           <div className="hero-status"><ShieldCheck size={15} /> Local only · Ready</div>
         </div>
       </section>
@@ -400,7 +403,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
 
 function CreatePage({ notify }: { notify: (message: string) => void }) {
   const [quality, setQuality] = useState("Balanced");
-  const [prompt, setPrompt] = useState("A quiet rooftop in Córdoba at blue hour, warm windows, cinematic photography");
+  const [prompt, setPrompt] = useState("A quiet travel courtyard at blue hour, warm windows, cinematic photography");
 
   return (
     <div className="page-stack">
@@ -475,7 +478,8 @@ function RestorePage({
   const [model, setModel] = useState("3B");
   const [target, setTarget] = useState("2×");
   const [preserveMetadata, setPreserveMetadata] = useState(true);
-  const [preserveLocation, setPreserveLocation] = useState(false);
+  const [locationMode, setLocationMode] = useState("Private");
+  const [manualLocation, setManualLocation] = useState("");
 
   return (
     <div className="page-stack">
@@ -493,7 +497,7 @@ function RestorePage({
           </div>
           <ComparisonStage src={restoreImage} value={compare} onChange={setCompare} />
           <div className="photo-meta">
-            <span><ImageIcon size={15} /><span><strong>{restoreName || "Córdoba_2026.jpg"}</strong><small>Original · Preview only</small></span></span>
+            <span><ImageIcon size={15} /><span><strong>{restoreName || "travel_photo.jpg"}</strong><small>Original · Preview only</small></span></span>
             <span className="photo-meta-values"><small>Target</small><strong>{target} upscale</strong></span>
           </div>
         </section>
@@ -521,7 +525,32 @@ function RestorePage({
 
           <div className="safety-box">
             <div className="setting-row"><span><strong>Keep camera and date</strong><small>Copies safe EXIF data into the export.</small></span><Toggle checked={preserveMetadata} onChange={setPreserveMetadata} label="Keep camera and date" /></div>
-            <div className="setting-row"><span><strong>Keep location</strong><small>Off by default for share-safe exports.</small></span><Toggle checked={preserveLocation} onChange={setPreserveLocation} label="Keep photo location" /></div>
+          </div>
+
+          <div className="location-card">
+            <div className="location-card__head">
+              <span><MapPin size={16} /></span>
+              <div><strong>Place information</strong><small>Decide if and how location is used.</small></div>
+            </div>
+            <Segmented
+              label="Photo location privacy"
+              options={["Private", "EXIF review", "Manual"]}
+              value={locationMode}
+              onChange={setLocationMode}
+            />
+            {locationMode === "Private" && (
+              <p className="location-note"><LockKeyhole size={14} /> GPS stays unread and is excluded from share-safe exports.</p>
+            )}
+            {locationMode === "EXIF review" && (
+              <p className="location-note"><Info size={14} /> If GPS exists, it will be shown for confirmation first. Metadata can be missing or inaccurate.</p>
+            )}
+            {locationMode === "Manual" && (
+              <label className="manual-location">
+                <span>Place label <small>optional</small></span>
+                <input value={manualLocation} onChange={(event) => setManualLocation(event.target.value)} placeholder="Add your own place label" />
+                <small>Saved as your note—not as a verified fact about the photograph.</small>
+              </label>
+            )}
           </div>
 
           <div className="restore-summary"><span><Gauge size={16} /><span><strong>{model === "3B" ? "Balanced memory" : "Maximum detail"}</strong><small>{model === "3B" ? "Best starting point for a photo batch." : "Slower, with a larger memory footprint."}</small></span></span><button type="button" aria-label="Open memory details"><ChevronDown size={15} /></button></div>
@@ -557,13 +586,14 @@ function TimeLensPage({ restoreImage }: { restoreImage: string | null }) {
       <section className="time-hero panel">
         <div className="time-visual">
           <ComparisonStage src={restoreImage} value={compare} onChange={setCompare} variant="archive" compact />
-          <div className="time-year"><small>Captured around</small><strong>{year}</strong></div>
+          <div className="time-year"><small>Working era</small><strong>{year}</strong><span>Set manually</span></div>
         </div>
         <div className="time-story">
           <span className="eyebrow">A guided restoration</span>
           <h3>Keep the texture of the moment.</h3>
-          <p>Time Lens separates repair from reinvention, so faces, places and the character of the original remain yours.</p>
-          <label className="year-control"><span><strong>Era</strong><small>{year < 1980 ? "Film archive" : year < 2000 ? "Late analogue" : "Early digital"}</small></span><input type="range" min="1940" max="2026" value={year} onChange={(event) => setYear(Number(event.target.value))} /></label>
+          <p>Time Lens separates repair from interpretation, so faces, places and the character of the original remain yours.</p>
+          <label className="year-control"><span><strong>Possible era</strong><small>{year < 1980 ? "Film archive" : year < 2000 ? "Late analogue" : "Early digital"}</small></span><input type="range" min="1940" max="2026" value={year} onChange={(event) => setYear(Number(event.target.value))} /></label>
+          <p className="truth-note"><Info size={14} /> This era is a creative input, not a verified capture date. Confirm it from your own records before saving.</p>
           <div className="time-toggles">
             <div className="setting-row"><span><strong>Natural colour recovery</strong><small>Balanced skin tones and faded dyes.</small></span><Toggle checked={color} onChange={setColor} label="Natural colour recovery" /></div>
             <div className="setting-row"><span><strong>Keep original grain</strong><small>Preserves the medium instead of polishing it away.</small></span><Toggle checked={grain} onChange={setGrain} label="Keep original grain" /></div>
@@ -645,9 +675,9 @@ function ModelsPage() {
 
 function ActivityPage() {
   const jobs = [
-    { title: "Córdoba evenings · restore", meta: "18 photos · SeedVR2 3B", time: "Today, 15:42", status: "Completed" },
-    { title: "Rooftop concept", meta: "4 variations · Auto", time: "Today, 14:18", status: "Completed" },
-    { title: "Family archive scan", meta: "1 photo · Time Lens", time: "Yesterday", status: "Completed" },
+    { title: "Golden-hour walk · restore", meta: "18 photos · SeedVR2 3B", time: "Today, 15:42", status: "Completed" },
+    { title: "Travel concept", meta: "4 variations · Auto", time: "Today, 14:18", status: "Completed" },
+    { title: "Archive scan", meta: "1 photo · Time Lens", time: "Yesterday", status: "Completed" },
   ];
   return (
     <div className="page-stack">
@@ -685,7 +715,9 @@ export default function App() {
   const [restoreImage, setRestoreImage] = useState<string | null>(null);
   const [restoreName, setRestoreName] = useState("");
   const [notice, setNotice] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
   const searchRef = useRef<HTMLButtonElement>(null);
+  const moreMenuFirstRef = useRef<HTMLButtonElement>(null);
   const activeMeta = navigation.find((item) => item.id === activePage) ?? navigation[0];
 
   useEffect(() => {
@@ -705,10 +737,16 @@ export default function App() {
         event.preventDefault();
         searchRef.current?.focus();
       }
+      if (event.key === "Escape") setMoreOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    window.requestAnimationFrame(() => moreMenuFirstRef.current?.focus());
+  }, [moreOpen]);
 
   const onFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -720,6 +758,7 @@ export default function App() {
 
   const navigate = (page: PageId) => {
     setActivePage(page);
+    setMoreOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -767,7 +806,16 @@ export default function App() {
           <div className="topbar-actions">
             <button ref={searchRef} type="button" className="search-button" aria-label="Open command search"><Search size={16} /><span>Search studio</span><kbd><Command size={11} />K</kbd></button>
             <span className="local-pill"><span /> Local only</span>
-            <button type="button" className="icon-button" aria-label="Open quick menu"><Menu size={18} /></button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={moreOpen ? "Close quick menu" : "Open quick menu"}
+              aria-expanded={moreOpen}
+              aria-controls="studio-quick-menu"
+              onClick={() => setMoreOpen((open) => !open)}
+            >
+              <Menu size={18} />
+            </button>
           </div>
         </header>
         <main id="studio-main" className="page-content" tabIndex={-1}>{page}</main>
@@ -778,8 +826,41 @@ export default function App() {
           const Icon = item.icon;
           return <button type="button" key={item.id} className={activePage === item.id ? "is-active" : ""} aria-current={activePage === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={19} /><span>{item.label}</span></button>;
         })}
-        <button type="button" className={activePage === "settings" || activePage === "models" || activePage === "activity" ? "is-active" : ""} onClick={() => navigate("settings")}><Menu size={19} /><span>More</span></button>
+        <button
+          type="button"
+          className={activePage === "settings" || activePage === "models" || activePage === "activity" || moreOpen ? "is-active" : ""}
+          aria-expanded={moreOpen}
+          aria-controls="studio-quick-menu"
+          onClick={() => setMoreOpen((open) => !open)}
+        >
+          <Menu size={19} /><span>More</span>
+        </button>
       </nav>
+      {moreOpen && (
+        <>
+          <button className="quick-menu-scrim" type="button" aria-label="Close quick menu" onClick={() => setMoreOpen(false)} />
+          <aside className="quick-menu" id="studio-quick-menu" aria-label="Quick menu">
+            <div className="quick-menu__header"><span className="eyebrow">Studio</span><strong>More tools</strong></div>
+            {navigation.slice(5).map((item, index) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  ref={index === 0 ? moreMenuFirstRef : undefined}
+                  type="button"
+                  key={item.id}
+                  className={activePage === item.id ? "is-active" : ""}
+                  aria-current={activePage === item.id ? "page" : undefined}
+                  onClick={() => navigate(item.id)}
+                >
+                  <span className="quick-menu__icon"><Icon size={17} /></span>
+                  <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                  <ArrowRight size={15} />
+                </button>
+              );
+            })}
+          </aside>
+        </>
+      )}
       {notice && <div className="toast" role="status"><Check size={16} />{notice}</div>}
     </div>
   );
