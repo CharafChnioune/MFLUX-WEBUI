@@ -1,7 +1,6 @@
 import os
 import json
 import ollama
-import gradio as gr
 from pathlib import Path
 import traceback
 
@@ -114,6 +113,13 @@ def load_settings():
 
 def create_ollama_settings(prompt_type="system"):
     """Create Ollama settings UI components"""
+    try:
+        import gradio as gr
+    except ImportError as exc:  # pragma: no cover - depends on optional UI extra
+        raise RuntimeError(
+            "Gradio is required for legacy WebUI helpers but is not installed."
+        ) from exc
+
     models, default_model = get_available_ollama_models()
     
     ollama_model = gr.Dropdown(

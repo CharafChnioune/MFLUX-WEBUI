@@ -1,7 +1,6 @@
 import os
 import json
 import gc
-import gradio as gr
 from typing import Optional, Any, List
 from pathlib import Path
 from .ollama_manager import enhance_prompt as enhance_prompt_ollama
@@ -203,8 +202,12 @@ def enhance_prompt(prompt: str, llm_type: str, ollama_model: str, mlx_model: str
                 enhanced = enhance_prompt_with_mlx(prompt, mlx_model, images=[image], tab_name=tab_name)
                 return enhanced
             else:
-                import gradio as gr
-                gr.Warning("Vision models require an image for prompt enhancement. Please upload a control image first.")
+                try:
+                    import gradio as gr
+                except ImportError:
+                    print("Vision models require an image for prompt enhancement.")
+                else:
+                    gr.Warning("Vision models require an image for prompt enhancement. Please upload a control image first.")
                 return prompt
         return enhance_prompt_with_mlx(prompt, mlx_model)
 

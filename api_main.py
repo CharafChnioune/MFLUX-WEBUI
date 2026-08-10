@@ -7,7 +7,7 @@ Usage:
     python api_main.py [--host HOST] [--port PORT]
 
 Default:
-    host=0.0.0.0, port=7861
+    host=127.0.0.1, port=7861
 
 Environment Variables:
     MFLUX_API_HOST - Override default host
@@ -38,7 +38,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables:
-  MFLUX_API_HOST       Override default host (default: 0.0.0.0)
+  MFLUX_API_HOST       Override default host (default: 127.0.0.1)
   MFLUX_API_PORT       Override default port (default: 7861)
   MFLUX_DEFAULT_MODEL  Set default model (default: flux2-klein-4b)
   MFLUX_OUTPUT_DIR     Set output directory
@@ -65,8 +65,8 @@ API Documentation:
 
     parser.add_argument(
         "--host",
-        default=os.getenv("MFLUX_API_HOST", "0.0.0.0"),
-        help="Host to bind to (default: 0.0.0.0)"
+        default=os.getenv("MFLUX_API_HOST", "127.0.0.1"),
+        help="Host to bind to (default: 127.0.0.1)"
     )
     parser.add_argument(
         "--port",

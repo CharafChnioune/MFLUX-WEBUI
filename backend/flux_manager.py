@@ -13,8 +13,6 @@ except ModuleNotFoundError:  # pragma: no cover - optional model support
     Flux2Klein = None
     Flux2KleinEdit = None
 from backend.lora_manager import process_lora_files, download_lora
-from backend.ollama_manager import enhance_prompt
-from backend.prompts_manager import enhance_prompt_with_mlx
 from backend.mlx_utils import force_mlx_cleanup, print_memory_usage
 from PIL import PngImagePlugin
 from backend.generation_workflow import (
@@ -41,6 +39,13 @@ from backend.model_manager import (
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def enhance_prompt(*args, **kwargs):
+    """Load the optional Ollama integration only when prompt enhancement is used."""
+    from backend.ollama_manager import enhance_prompt as _enhance_prompt
+
+    return _enhance_prompt(*args, **kwargs)
 
 
 def is_flux2_model_name(model_name: str) -> bool:
@@ -1138,6 +1143,7 @@ def generate_image_i2i_gradio(
         lora_paths = process_lora_files(lora_files)
         lora_scales_float = process_lora_files(lora_files, lora_scales)
         base_model_override = normalize_base_model_choice(base_model)
+        is_flux2 = is_flux2_model_name(model)
         
         # Determine seed via shared workflow (Auto Seeds + fallback)
         seed_int: Optional[int] = None

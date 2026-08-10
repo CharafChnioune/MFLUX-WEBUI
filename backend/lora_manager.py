@@ -4,7 +4,6 @@ import json
 import requests
 from pathlib import Path
 from tqdm import tqdm
-import gradio as gr
 from huggingface_hub import hf_hub_download, HfApi
 
 LORA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lora")
@@ -19,6 +18,17 @@ if env_lora:
             EXTRA_LORA_DIRS.append(os.path.expanduser(p.strip()))
 
 MAX_LORAS = 5
+
+
+def _get_gradio():
+    """Import Gradio only for legacy UI helpers."""
+    try:
+        import gradio as gr
+    except ImportError as exc:  # pragma: no cover - depends on optional UI extra
+        raise RuntimeError(
+            "Gradio is required for legacy WebUI helpers but is not installed."
+        ) from exc
+    return gr
 
 def get_available_lora_files():
     """
@@ -132,6 +142,7 @@ def update_lora_scales(selected_loras):
     """
     Update the Gradio components for LoRA scales based on selected LoRAs.
     """
+    gr = _get_gradio()
     if not selected_loras:
         return [gr.update(visible=False)] * MAX_LORAS
     
@@ -276,6 +287,7 @@ def download_lora_model(hf_model_name, api_key=None):
 
 def refresh_lora_choices():
     """Refresh the list of LoRA choices."""
+    gr = _get_gradio()
     choices = get_lora_choices()
     return gr.update(choices=choices)
 
@@ -290,6 +302,7 @@ def get_updated_lora_files():
             - Third update: Choices for the third LoRA selection component
             - str: Status message indicating success or failure
     """
+    gr = _get_gradio()
     try:
         choices = get_lora_choices()
         return gr.update(choices=choices), gr.update(choices=choices), gr.update(choices=choices), "LoRA files updated successfully"

@@ -17,7 +17,7 @@ Endpoints:
 - GET  /api/v1/stats
 
 Launch: python -m backend.api_server [host] [port]
-Default: host=0.0.0.0, port=7861
+Default: host=127.0.0.1, port=7861
 """
 
 import base64
@@ -27,24 +27,17 @@ import sys
 import tempfile
 import time
 import os
+import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import urlparse
 
-from PIL import Image
-
-from backend.flux_manager import (
-    generate_image_gradio,
-    generate_image_i2i_gradio,
-    generate_image_controlnet_gradio,
-)
-from backend import upscale_manager
-from backend.model_manager import get_updated_models, get_custom_model_config
-
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
 PORT = 7861
 DEFAULT_MODEL = "flux2-klein-4b"
 _CURRENT_MODEL = None
+WEBUI_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 # Regex patterns for path-parameter routes
 _RE_JOB_STREAM = re.compile(r"^/api/v1/jobs/([a-f0-9]+)/stream$")
@@ -57,6 +50,8 @@ def _current_model():
     if _CURRENT_MODEL:
         return _CURRENT_MODEL
     try:
+        from backend.model_manager import get_updated_models
+
         available = get_updated_models()
         if DEFAULT_MODEL in available:
             _CURRENT_MODEL = DEFAULT_MODEL
@@ -96,6 +91,8 @@ def _list_models_payload():
     """
     models = []
     try:
+        from backend.model_manager import get_custom_model_config, get_updated_models
+
         aliases = get_updated_models()
     except Exception:
         aliases = [DEFAULT_MODEL]
@@ -149,7 +146,9 @@ def _encode_pil_to_base64(image):
     return base64.b64encode(buff.getvalue()).decode("utf-8")
 
 
-def _decode_base64_image(data_b64) -> Image.Image:
+def _decode_base64_image(data_b64):
+    from PIL import Image
+
     if data_b64 is None:
         raise ValueError("No image provided")
     if "," in data_b64:
@@ -158,7 +157,7 @@ def _decode_base64_image(data_b64) -> Image.Image:
     return Image.open(BytesIO(raw)).convert("RGB")
 
 
-def _save_temp_image(img: Image.Image) -> str:
+def _save_temp_image(img) -> str:
     fd, path = tempfile.mkstemp(suffix=".png")
     with os.fdopen(fd, "wb") as f:
         img.save(f, format="PNG")
@@ -190,6 +189,9 @@ class APIServer(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        if not path.startswith("/api/") and not path.startswith("/sdapi/"):
+            return self.handle_webui(path)
+
         # Existing SD WebUI endpoints
         if path == "/sdapi/v1/options":
             return self.handle_options()
@@ -203,6 +205,8 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_v1_models()
         if path == "/api/v1/system":
             return self.handle_system()
+        if path == "/api/v1/providers/nativ":
+            return self.handle_nativ_status()
         if path == "/api/v1/queue":
             return self.handle_queue()
         if path == "/api/v1/stats":
@@ -219,6 +223,26 @@ class APIServer(BaseHTTPRequestHandler):
             return self.handle_get_job(m.group(1))
 
         return _bad_request(self, "Unknown endpoint", status=404)
+
+    def handle_webui(self, path: str):
+        """Serve the built React studio, falling back to its SPA entrypoint."""
+        if not WEBUI_DIST.exists():
+            return _json_response(self, {
+                "status": "studio-not-built",
+                "message": "Build frontend with npm run build in frontend/."
+            }, status=503)
+        candidate = (WEBUI_DIST / path.lstrip("/")).resolve()
+        if not str(candidate).startswith(str(WEBUI_DIST.resolve())) or not candidate.is_file():
+            candidate = WEBUI_DIST / "index.html"
+        content_type, _ = mimetypes.guess_type(candidate.name)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type or "application/octet-stream")
+            self.send_header("Cache-Control", "no-cache" if candidate.name == "index.html" else "public, max-age=31536000, immutable")
+            self.end_headers()
+            self.wfile.write(candidate.read_bytes())
+        except (OSError, BrokenPipeError):
+            return
 
     # ── POST routing ────────────────────────────────────────────────
 
@@ -263,6 +287,8 @@ class APIServer(BaseHTTPRequestHandler):
     # ── Existing SD WebUI handlers (unchanged) ──────────────────────
 
     def handle_txt2img(self):
+        from backend.flux_manager import generate_image_gradio
+
         try:
             data = self._read_json()
         except Exception as exc:
@@ -329,6 +355,8 @@ class APIServer(BaseHTTPRequestHandler):
         return _json_response(self, response)
 
     def handle_img2img(self):
+        from backend.flux_manager import generate_image_i2i_gradio
+
         try:
             data = self._read_json()
         except Exception as exc:
@@ -399,6 +427,8 @@ class APIServer(BaseHTTPRequestHandler):
         return _json_response(self, response)
 
     def handle_controlnet(self):
+        from backend.flux_manager import generate_image_controlnet_gradio
+
         try:
             data = self._read_json()
         except Exception as exc:
@@ -468,6 +498,8 @@ class APIServer(BaseHTTPRequestHandler):
         return _json_response(self, response)
 
     def handle_upscale(self):
+        from backend import upscale_manager
+
         try:
             data = self._read_json()
         except Exception as exc:
@@ -520,6 +552,11 @@ class APIServer(BaseHTTPRequestHandler):
             "inpainting_fill": 1,
         }
         return _json_response(self, options)
+
+    def handle_nativ_status(self):
+        """Expose only a local provider health/model summary to the studio."""
+        from backend.nativ_provider import status
+        return _json_response(self, status())
 
     def handle_options_update(self):
         """
@@ -661,6 +698,8 @@ class APIServer(BaseHTTPRequestHandler):
 
     def handle_v1_models(self):
         """GET /api/v1/models - models with capabilities."""
+        from backend.model_manager import get_custom_model_config, get_updated_models
+
         models = []
         try:
             aliases = get_updated_models()

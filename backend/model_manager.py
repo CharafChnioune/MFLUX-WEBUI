@@ -4,7 +4,6 @@ from pathlib import Path
 from shutil import disk_usage
 from typing import Dict, List, Optional
 
-import gradio as gr
 from huggingface_hub import HfApi, snapshot_download
 
 from backend.mflux_compat import ModelConfig as MfluxModelConfig
@@ -15,6 +14,17 @@ from backend.mflux_compat import ModelConfig as MfluxModelConfig
 
 BASE_MODEL_CHOICES = ["flux2-klein-4b", "flux2-klein-9b"]
 MODELS: Dict[str, "CustomModelConfig"] = {}
+
+
+def _get_gradio():
+    """Import Gradio only for legacy UI helpers."""
+    try:
+        import gradio as gr
+    except ImportError as exc:  # pragma: no cover - depends on optional UI extra
+        raise RuntimeError(
+            "Gradio is required for legacy WebUI helpers but is not installed."
+        ) from exc
+    return gr
 
 
 class CustomModelConfig:
@@ -365,6 +375,7 @@ def update_guidance_visibility(model):
     Ensure guidance controls follow docs guidance for interactive components
     (gradiodocs/guides-key-component-concepts/gradio_components_the_key_concepts.md).
     """
+    gr = _get_gradio()
     model_name = (model or "").lower()
     if model_name.startswith(("flux2-", "klein-")):
         if model_name.startswith("flux2-dev"):
@@ -396,5 +407,6 @@ def update_guidance_visibility(model):
 
 
 def get_model_choices():
+    gr = _get_gradio()
     models = get_updated_models()
     return gr.update(choices=models) if models else gr.update()
